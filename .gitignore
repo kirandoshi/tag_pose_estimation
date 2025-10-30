@@ -1,0 +1,16 @@
+**/build/*
+.vscode/**
+.chache/**
+*.idx
+*.json
+*.txt
+*.pdf
+*.png
+
+*.npy
+*.log
+__pycache__/
+venv/
+
+# Apriltag package
+python_apriltag/

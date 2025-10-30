@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling>=1.0.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tag-pose-estimation"
+version = "0.1.0"
+description = "Fiduciary tag based pose estimation toolbox for CRL. Provides everything necessary to setup and run tag based pose estimation on a robot platform."
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "cma==4.0.0",
+    "gtsam==4.2a7",
+    "numpy<2",
+    "matplotlib==3.10.1",
+    "opencv-contrib-python==4.11.0.86",
+    "opencv-python==4.11.0.86",
+    "pyrealsense2==2.53.1.4623",
+    "PyYAML==6.0.2",
+    "pyzmq==26.3.0",
+    "robotic==0.2.2",
+    "scipy==1.15.2",
+    "sortedcontainers==2.4.0",
+]
+
+# Add this section for editable installs
+[tool.setuptools.dynamic]
+version = {attr = "tag_pose_estimation.__version__"}
+
+[tool.hatch.build.targets.wheel]
+packages = ["tag_pose_estimation"]
+
+[tool.hatch.build]
+only-packages = true
