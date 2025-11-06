@@ -31,6 +31,13 @@ from tag_pose_estimation.detector_wrappers import (
 )
 
 class BoardBuilder:
+    """
+    Class to build a board from detected markers with a connected live camera.
+
+    Builds a board, a 3D configuration of markers with known relative positions,
+    by detecting markers in the captured frames of a connected camera. Board can
+    then be saved to a JSON file for later use in pose estimation.
+    """
     def __init__(
             self,
             camera_config_path: str, 
@@ -39,11 +46,20 @@ class BoardBuilder:
             tag_family: str,
             filter_max_id: int = None):
         """
-        Initialize ArUco board detector.
+        Initialize BoardBuilder with camera and detector.
 
         Args:
-            marker_size: Size of markers in meters
-            serial_number: Serial number of the RealSense camera to use (optional)
+            camera_config_path (str): 
+                Path to camera configuration file.
+            marker_size (int): 
+                Size of each marker in meters.
+            tag_type (str): 
+                Type of tag ("apriltag" or "aruco").
+            tag_family (str): 
+                Tag family for either of the tag types.
+            filter_max_id (int, optional): 
+                Maximum marker ID to consider. If set, any id higher than this 
+                value will be ignored.
         """
         # Set up the detector
         self._tag_family = tag_family
@@ -194,10 +210,6 @@ class BoardBuilder:
         for idx, key in enumerate(keys):
             initial.insert(idx, self.pose_from_matrix(poses_init[key]))
 
-        # # Add nodes (initial guesses)
-        # for idx, key in enumerate(keys):
-        #     initial.insert(idx, Pose3())  # Identity as initial guess
-
         # Add relative pose constraints
         for i, js in rel_poses.items():
             for j, T_i_j in js.items():
@@ -311,7 +323,6 @@ class BoardBuilder:
         Returns:
             dict: Mapping of marker IDs to their positions relative to the reference marker
         """
-
         # First, find the marker that appears most frequently to use as reference
         marker_counts = defaultdict(int)
         for ids, poses in observations:
@@ -357,7 +368,6 @@ class BoardBuilder:
         Returns:
             dict: Mapping of marker IDs to their positions relative to the reference marker
         """
-
         # First, find the marker that appears most frequently to use as reference
         marker_counts = defaultdict(int)
         for ids, poses in observations:
@@ -448,8 +458,6 @@ class BoardBuilder:
         Returns:
             numpy.ndarray: Average 4x4 transformation matrix
         """
-        
-
         # Separate rotations and translations
         rotations = [t[:3, :3] for t in transforms]
         translations = [t[:3, 3] for t in transforms]
@@ -608,13 +616,9 @@ class BoardBuilder:
                 raise ValueError("No markers detected")
 
             # Process all captured poses to get consistent marker positions
-            # marker_positions = compute_marker_positions(
-            #     all_marker_poses, reference_marker
-            # )
             marker_positions = self.compute_marker_positions_gtsam(
                 all_marker_poses, reference_marker
             )
-            # marker_positions = optimize_with_switchable_constraints(all)
 
             # Convert marker_positions to the format needed for board creation
             marker_corners_list = []
@@ -760,23 +764,23 @@ def main():
         ),
     )
 
-    # args = parser.parse_args()
+    args = parser.parse_args()
 
     
     # Use real CLI args by default, but allow an easy drop-in debug config via
     # the DEBUG_ARGS env var (set to "1" to enable).
-    args = argparse.Namespace(
-        camera_config_path="/home/kiran/pose_estimation_ws/robot_ipc_control/robot_ipc_control/configs/test_cam_config.json",
-        marker_size=0.032625,
-        apriltag_family="tag16h5",
-        name="debug_board",
-        center_pose=False,
-        reference_marker=7,
-        # reference_marker=None,
-        reference_marker_offset="0.0,0.02175,0.0",
-        # reference_marker_offset=None,
-        max_id=17,
-    )
+    # args = argparse.Namespace(
+    #     camera_config_path="/home/kiran/pose_estimation_ws/robot_ipc_control/robot_ipc_control/configs/test_cam_config.json",
+    #     marker_size=0.032625,
+    #     apriltag_family="tag16h5",
+    #     name="debug_board",
+    #     center_pose=False,
+    #     reference_marker=7,
+    #     # reference_marker=None,
+    #     reference_marker_offset="0.0,0.02175,0.0",
+    #     # reference_marker_offset=None,
+    #     max_id=17,
+    # )
 
     # Initialize detector
     detector = BoardBuilder(
