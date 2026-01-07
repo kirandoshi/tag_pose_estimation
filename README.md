@@ -17,7 +17,25 @@ Initial Readme copied from current pose estimation repo - needs to be updated.
 
 ## Getting started with pose estimation
 
-#### Calibration of a camera
+#### Instrinsic camera calibration
+Before running the camera calibration, connect the camera to the computer. 
+Then you need to create a Charuco board for the calibration.
+You can find a default intrinsic camera calibration Charuco board in 
+`configs/calibration_boards/default_intrinsic_charuco_board`.
+The pdf file can be printed and used for the calibration, the json file is used
+by the calibration script to load the board parameters and the png file is for
+convenience to quickly view the board.
+
+Alternatively, can use the script `scripts/generate_charuco_board.py` to 
+generate a custom Charuco board which saves the board files (`.pdf`, `.json`, 
+`.png`) under the `configs/calibration_boards` folder.
+See the script help for more information on how to use it and the parameters to set.
+
+The intrinsic calibration of a camera can be performed using the script
+```
+python scripts/camera_intrinsic_calibration.py --serial_number 242322072500 --charuco_board_path ./configs/boards/charuco_board_5x7_100.json
+```
+where the charuco_board_path is optional. If not provided, a default board will be used.
 A camera can be calibrated using
 ```
 python3 pose_estimation/camera_calibration.py --serial_number 242322072500
