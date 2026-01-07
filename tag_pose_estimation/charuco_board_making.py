@@ -18,7 +18,6 @@ def create_charuco_board(
         square_length_m: float, 
         marker_length_m: float, 
         aruco_dict_name: str, 
-        output_pdf: str,
         start_id: int = 0
     ) -> None:
     # Get the aruco dictionary

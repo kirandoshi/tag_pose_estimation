@@ -26,10 +26,6 @@ def main():
         help="Aruco dictionary name (e.g., DICT_4X4_50)"
     )
     parser.add_argument(
-        "--output_pdf", type=str, default="charuco_board.pdf", 
-        help="Output PDF file name"
-    )
-    parser.add_argument(
         "--start_id", type=int, default=0, 
         help="Starting marker ID (default: 0)"
     )
@@ -42,7 +38,6 @@ def main():
         square_length_m=args.square_length_m,
         marker_length_m=args.marker_length_m,
         aruco_dict_name=args.aruco_dict,
-        output_pdf=args.output_pdf,
         start_id=args.start_id
     )
 
