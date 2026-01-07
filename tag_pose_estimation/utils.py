@@ -1,3 +1,4 @@
+from pathlib import Path
 import cv2
 import json
 
@@ -5,6 +6,9 @@ import numpy as np
 
 from tag_pose_estimation.apriltag_board import AprilTagBoard
 
+def get_project_root() -> Path:
+    """ Returns the root directory of the project. """
+    return Path(__file__).parent.parent.resolve()
 
 def board_to_json(board, dict_name):
     marker_data = {"dictionary": dict_name, "markers": []}

@@ -1,11 +1,16 @@
+from pathlib import Path
+import datetime
+
 import cv2
 import numpy as np 
-import argparse
 from cv2 import aruco
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 
-from tag_pose_estimation.utils import charuco_board_to_json
+from tag_pose_estimation.utils import (
+    charuco_board_to_json,
+    get_project_root,
+)
 
 def create_charuco_board(
         squares_x: int, 
@@ -50,18 +55,26 @@ def create_charuco_board(
     # Compute board size in mm
     print(f"Board size: {img_size_x_mm} mm x {img_size_y_mm} mm")
 
-    save_name_png = output_pdf.replace(".pdf", ".png")
+    # Output file path
+    calibration_folder = get_calibration_board_save_folder()
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    save_folder = calibration_folder / f"{timestamp}_charuco_board"
+    save_folder.mkdir()
 
     # Save as PNG for embedding in PDF
-    cv2.imwrite(save_name_png, board_img)
+    save_name_png = save_folder / "charuco_board.png"
+    cv2.imwrite(str(save_name_png), board_img)
 
     # Create PDF with true-to-size image
-    c = canvas.Canvas(output_pdf, pagesize=(img_size_x_mm * mm, img_size_y_mm * mm))
+    save_name_pdf = save_folder /"charuco_board.pdf"
+    c = canvas.Canvas(str(save_name_pdf), pagesize=(img_size_x_mm * mm, img_size_y_mm * mm))
     c.drawImage(save_name_png, 0, 0, width=img_size_x_mm * mm, height=img_size_y_mm * mm)
     c.save()
 
     # Export the board and dictionary for later use as json
-    save_name_json = output_pdf.replace(".pdf", ".json")
+    save_name_json = save_folder / "charuco_board.json"
     charuco_board_to_json(
         board,
         squares_x,
@@ -74,23 +87,15 @@ def create_charuco_board(
 
     return None
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Create a customizable Charuco board and save as PDF.")
-    parser.add_argument("--squares_x", type=int, required=True, help="Number of squares in X direction")
-    parser.add_argument("--squares_y", type=int, required=True, help="Number of squares in Y direction")
-    parser.add_argument("--square_length_m", type=float, required=True, help="Square length in m")
-    parser.add_argument("--marker_length_m", type=float, required=True, help="Marker length in m    ")
-    parser.add_argument("--aruco_dict", type=str, default="DICT_4X4_50", help="Aruco dictionary name (e.g., DICT_4X4_50)")
-    parser.add_argument("--output_pdf", type=str, default="charuco_board.pdf", help="Output PDF file name")
-    parser.add_argument("--start_id", type=int, default=0, help="Starting marker ID (default: 0)")
-    args = parser.parse_args()
+def get_calibration_board_save_folder() -> Path:
+    project_root = get_project_root()
+    calibration_folder = project_root / "config" / "calibration_boards"
 
-    create_charuco_board(
-        squares_x=args.squares_x,
-        squares_y=args.squares_y,
-        square_length_m=args.square_length_m,
-        marker_length_m=args.marker_length_m,
-        aruco_dict_name=args.aruco_dict,
-        output_pdf=args.output_pdf,
-        start_id=args.start_id
-    )
+    # Create the directory if it doesn't exist
+    if not calibration_folder.parent.exists():
+        calibration_folder.parent.mkdir()
+
+    if not calibration_folder.exists():
+        calibration_folder.mkdir()
+    
+    return calibration_folder
