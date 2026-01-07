@@ -1,6 +1,6 @@
 import argparse
 
-from tag_pose_estimation.make_charuco_board import create_charuco_board
+from tag_pose_estimation.charuco_board_making import create_charuco_board
 
 def main():
     parser = argparse.ArgumentParser(
