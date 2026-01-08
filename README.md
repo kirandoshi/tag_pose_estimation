@@ -44,6 +44,40 @@ v4l2-ctl --list-devices
 ```
 (You might need to install v4l-utils package `sudo apt install v4l-utils`).
 
+### Extrinsic camera calibration
+*Section to be updated*
+
+### Object board creation
+To be able to estimate the pose of an object, we need to define the geometry of
+the arrangement of tags on the object.
+To simply create such a board definition file, we provide a script
+```
+python scripts/build_object_board.py 
+--marker_size [marker size in meters]
+--tag_type [aruco or apriltag]
+--tag_family [tag family, e.g. DICT_4X4_50 for aruco, tag36h11 for apriltag]
+--camera_config_path [path to camera config file]
+--reference_marker [id of reference marker, optional]
+--name [name of the board, optional] 
+--max_id [maximum marker id to consider, optional]
+```
+This will open a window showing the camera feed and the detected markers.
+By pressing the space bar, a snapshot will be taken and the individually resulting
+poses of the detected markers will be visualised. If the detection looks good,
+the current frame can be accepted to be used to compute the board pressing 'y or
+rejected by pressing 'n'. 
+Multiple snapshots need to be taken to connect all markers to each other. For 
+better accuracy, it is recommended that multiple markers are visible in each
+snapshot. For 3D objects, the markers on different planes need to be visible in
+the same snapshot to be able to connect them to each other.
+After finishing the data collection, the poses of the markers will be optimized
+and the final marker corner positions will be computed in the board frame. 
+The board frame is either the center of all markers or the center of the
+reference marker if provided.
+(An additional offset can be provided to shift the origin to a desired location,
+see script help for more information).
+The resulting board definition file will be saved in the `configs/object_boards` 
+folder.
 ### Calibration of the robot base position
 The robot base position relative to the 0-position can be calibrated using
 ```
