@@ -17,11 +17,11 @@ Initial Readme copied from current pose estimation repo - needs to be updated.
 
 ## Getting started with pose estimation
 
-#### Instrinsic camera calibration
+### Instrinsic camera calibration
 Before running the camera calibration, connect the camera to the computer. 
 Then you need to create a Charuco board for the calibration.
 You can find a default intrinsic camera calibration Charuco board in 
-`configs/calibration_boards/default_intrinsic_charuco_board`.
+`configs/calibration_boards/default_intrinsic_charuco_board/`.
 The pdf file can be printed and used for the calibration, the json file is used
 by the calibration script to load the board parameters and the png file is for
 convenience to quickly view the board.
@@ -33,13 +33,16 @@ See the script help for more information on how to use it and the parameters to 
 
 The intrinsic calibration of a camera can be performed using the script
 ```
-python scripts/camera_intrinsic_calibration.py --serial_number 242322072500 --charuco_board_path ./configs/boards/charuco_board_5x7_100.json
+python scripts/camera_intrinsic_calibration.py --cam_name <camera_name_or_id> 
+--charuco_board_path [path to charuco board json file] --f [focus value to set]
 ```
 where the charuco_board_path is optional. If not provided, a default board will be used.
-A camera can be calibrated using
+The camera_name_or_id can be the serial number of the camera or the device id string
+which you can determine on ubuntu using the command 
 ```
-python3 pose_estimation/camera_calibration.py --serial_number 242322072500
+v4l2-ctl --list-devices
 ```
+(You might need to install v4l-utils package `sudo apt install v4l-utils`).
 
 ### Calibration of the robot base position
 The robot base position relative to the 0-position can be calibrated using
