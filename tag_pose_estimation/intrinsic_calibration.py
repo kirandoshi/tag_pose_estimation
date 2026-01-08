@@ -1,29 +1,47 @@
 import cv2
 import numpy as np
 
-import sys
-import os
 from pathlib import Path
 import datetime
 
 from tag_pose_estimation.utils import (
     get_larger_board,
-    load_charuco_board_from_json
+    load_charuco_board_from_json,
+    get_project_root,
 )
 from tag_pose_estimation.camera_wrappers import (
     WebcamCamera,
 )
 
-def main(args):
+def intrinsic_camera_calibration(args):
     # Create Charuco board and dictionary
-    if args.charuco_board_path and os.path.exists(args.charuco_board_path):
+    if args.charuco_board_path and Path(args.charuco_board_path).exists():
         board, aruco_dict = load_charuco_board_from_json(
             args.charuco_board_path)
         print(f"Loaded Charuco board from {args.charuco_board_path}")
     else:
-        board, aruco_dict = get_larger_board(False)
-        print("Using default larger Charuco board with 4x4 markers on 5x4 grid,"
-              " marker length 0.04216 m.")
+        if args.charuco_board_path:
+            print(f"Charuco board path {args.charuco_board_path} does not exist.")
+            print("Using default intrinsic calibration Charuco board instead.")
+            print("The default board can be found at "
+                  "'config/calibration_boards/default_intrinsic_calibration_board.json'")
+        else:
+            print("No Charuco board path provided.")
+            print("Using default intrinsic calibration Charuco board instead.")
+            print("The default board can be found at "
+                  "'config/calibration_boards/default_intrinsic_calibration_board.json'")
+            print("The default board has 3x5 squares with 0.058m square length " 
+                  "and 0.045m marker length.")
+            print("Ensure that the board is printed at the correct scale for "
+                  "accurate calibration.")
+        board, aruco_dict = load_charuco_board_from_json(
+            str(get_project_root() /
+                "config" /
+                "calibration_boards" /
+                "default_intrinsic_calibration_board" /
+                "charuco_board.json"
+            )
+        )
 
     # Setup parameters
     all_corners = []
@@ -71,17 +89,27 @@ def main(args):
 
     if len(all_corners) < 15:
         print(f"Not enough valid frames collected: {len(all_corners)}")
+        print("Need at least 15 frames with detected corners for calibration.")
         exit(1)
+    else:
+        print(f"Collected {len(all_corners)} valid frames for calibration.")
+        print("Calibrating...")
 
-    # Calibrate
-    ret, camera_matrix, dist_coeffs, _, _ = cv2.aruco.calibrateCameraCharuco(
-        charucoCorners=all_corners,
-        charucoIds=all_ids,
-        board=board,
-        imageSize=img_size,
-        cameraMatrix=None,
-        distCoeffs=None,
-    )
+    try:
+        # Calibrate
+        ret, camera_matrix, dist_coeffs, _, _ = cv2.aruco.calibrateCameraCharuco(
+            charucoCorners=all_corners,
+            charucoIds=all_ids,
+            board=board,
+            imageSize=img_size,
+            cameraMatrix=None,
+            distCoeffs=None,
+        )
+    except cv2.error as e:
+        print(f"Calibration failed: {e}")
+        print("Ensure that enough valid frames with detected corners were collected.")
+        print("Likely causes: insufficient number of corners or poor corner detection.")
+        print("Try collecting more frames")
 
     print(f"Camera Matrix after calibration:\n{camera_matrix}")
     print(f"Distortion Coefficients after calibration:\n{dist_coeffs}")
@@ -91,13 +119,16 @@ def main(args):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Save all files to folder
-    Path(f"intrinsic_calibration_{timestamp}").mkdir()
+    calibration_folder = get_intrinsic_calibration_save_folder()
+    calibration_folder = calibration_folder / f"cal_{timestamp}"
+    calibration_folder.mkdir()
 
     focus_value = cam.cap.get(cv2.CAP_PROP_FOCUS)
     print(f"Read focus value at end: {focus_value}")
 
     # Save to text file
-    with open(f"intrinsic_calibration_{timestamp}/description.txt", "w") as f:
+    txt_file_path = calibration_folder / "description.txt"
+    with open(txt_file_path, "w") as f:
         f.write("Intrinsic Calibration Results\n")
         f.write(f"Camera Name/ID: {cam_name}\n")
         f.write(f"Date and Time: {timestamp}\n\n")
@@ -109,41 +140,27 @@ def main(args):
         f.write("\nFocus Value:\n")
         f.write(str(focus_value))
         f.write(f"\nReprojection error: {ret}\n")
-    print(f"Saved intrinsic_calibration_{timestamp}/results.txt")
+    print(f"Saved {txt_file_path}")
     # Save focus value to npy
-    
-    np.save(f"intrinsic_calibration_{timestamp}/focus_value.npy", focus_value)
-    print(f"Saved focus_value_{timestamp}.npy")
+    focus_value_path = calibration_folder / "focus_value.npy"
+    np.save(focus_value_path, focus_value)
+    print(f"Saved {focus_value_path}")
     # Save to .npy
-    np.save(f"intrinsic_calibration_{timestamp}/camera_matrix.npy", camera_matrix)
-    np.save(f"intrinsic_calibration_{timestamp}/dist_coeffs.npy", dist_coeffs)
-    print(f"Saved camera_matrix_{timestamp}.npy and dists_coeffs_{timestamp}.npy")
-
+    camera_matrix_path = calibration_folder / "camera_matrix.npy"
+    dist_coeffs_path = calibration_folder / "dist_coeffs.npy"
+    np.save(camera_matrix_path, camera_matrix)
+    np.save(dist_coeffs_path, dist_coeffs)
+    print(f"Saved {camera_matrix_path} and {dist_coeffs_path}")
     cam.release()
 
-if __name__ == "__main__":
-    import argparse
+    return None
 
-    parser = argparse.ArgumentParser(
-        description="Intrinsic camera calibration using a Charuco board."
-    )
-    parser.add_argument(
-        "--cam_name",
-        type=str,
-        help="Camera name or ID",
-    )
-    parser.add_argument(
-        "-cb", "--charuco_board_path",
-        type=str,
-        default="charuco_board.json",
-        help="Path to the Charuco board JSON file"
-    )
-    parser.add_argument(
-        "-f", "--focus",
-        type=int,
-        default=0,
-        help="Focus value to set between 0 and 250 or  0 and 1 depending on "
-            " camera. Default is 0. Autofocus is turned off in this script.",
-    )
-    args = parser.parse_args()
-    main(args)
+def get_intrinsic_calibration_save_folder() -> Path:
+    root = get_project_root()
+    save_folder = root / "config" / "intrinsic_calibration"
+    # Create the directory if it doesn't exist
+    if not save_folder.parent.exists():
+        save_folder.parent.mkdir()
+    if not save_folder.exists():
+        save_folder.mkdir()
+    return save_folder
