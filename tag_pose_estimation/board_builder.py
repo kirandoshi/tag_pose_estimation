@@ -1,14 +1,13 @@
+import datetime
+from pathlib import Path
 import sys
-import os
 from collections import defaultdict
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 import json
 import cv2
-import argparse
 import numpy as np
-import matplotlib.pyplot as plt
 import gtsam
 from gtsam import Pose3, Rot3, Point3, BetweenFactorPose3, noiseModel
 from gtsam import (
@@ -21,14 +20,79 @@ from gtsam import (
 )
 
 from tag_pose_estimation.camera_wrappers import WebcamCamera, RealSenseCamera
-from tag_pose_estimation.utils import board_to_json
-from tag_pose_estimation.apriltag_utils import (
-    detections_to_corners_ids)
+from tag_pose_estimation.utils import board_to_json, get_project_root
 from tag_pose_estimation.apriltag_board import AprilTagBoard
 from tag_pose_estimation.detector_wrappers import (
     AprilTagDetectorWrapper,
     ArucoTagDetectorWrapper
 )
+
+def build_object_board(args):
+    """
+    Build an AprilTag board from detected markers and save to JSON.
+
+    Uses the BoardBuilder class to detect markers and create a board (the layout
+    of markers in 3D space). The resulting board configuration is serialized to
+    JSON and saved to a file.
+    
+    Args:
+        args: Command-line arguments containing configuration parameters.
+    Returns:
+        None
+    """
+    # Get save folder
+    save_folder = get_object_board_save_folder()
+    
+    # Ensure save file does not overwrite existing files
+    if not args.name == "":
+        save_file_name = f"{args.name}.json"
+        save_path = save_folder / save_file_name
+        counter = 1
+        while save_path.exists():
+            save_file_name = f"{args.name}_{counter}.json"
+            save_path = save_folder / save_file_name
+            counter += 1
+    else:
+        # Default name
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = save_folder / (
+            f"board_{args.tag_type}_{args.tag_family}_"
+            f"{timestamp}.json"
+        )
+
+    # Initialize detector
+    detector = BoardBuilder(
+        marker_size=args.marker_size,
+        tag_type=args.tag_type,
+        tag_family=args.tag_family,
+        camera_config_path=args.camera_config_path,
+        filter_max_id=args.max_id
+    )
+
+    if args.reference_marker_offset is not None:
+        reference_marker_offset = np.array(
+            [float(x) for x in args.reference_marker_offset.split(",")]
+        )
+    else:
+        reference_marker_offset = None
+
+    # Create new board configuration
+    print("Creating new board configuration...")
+    board, _, _ = (
+        detector.create_board_from_detections(
+            center_pose=args.center_pose, 
+            reference_marker=args.reference_marker,
+            reference_marker_offset=reference_marker_offset,
+        )
+    )
+
+    serialized_board = board_to_json(board, args.tag_family)
+
+    # Save to JSON
+    with open(save_path, "w") as f:
+        json.dump(serialized_board, f, indent=4)
+    
+    return None
 
 class BoardBuilder:
     """
@@ -219,7 +283,15 @@ class BoardBuilder:
                 graph.add(BetweenFactorPose3(idx_i, idx_j, Tij, huber))
 
         # Add prior to anchor pose
-        anchor_key = list(keys.values())[reference_marker]
+        keys_val_list = list(keys.values())
+        if len(keys_val_list) < reference_marker:
+            raise ValueError(
+                f"All markers with id less than {reference_marker} need to be "
+                "detected at least once. Likely more images need to be "
+                "captured to build the board."
+                f" Only have markers: {list(keys.keys())}"
+            )
+        anchor_key = keys_val_list[reference_marker]
         prior_noise = noiseModel.Diagonal.Sigmas(
             np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
         )
@@ -543,7 +615,7 @@ class BoardBuilder:
             reference_marker_offset=None, 
         ):
         """
-        Create an ArUco board by detecting markers and their relative positions.
+        Create an tag board by detecting markers and their relative positions.
         Returns the board object and marker positions.
         """
         all_marker_poses = []
@@ -557,8 +629,7 @@ class BoardBuilder:
                 # Detect markers
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 
-                detections = self._detector.detect(gray)
-                corners, ids = detections_to_corners_ids(detections)
+                corners, ids = self._detector.detect(gray)
 
                 # Filter detections if needed
                 corners, ids = self.filter_detections(corners, ids)
@@ -683,13 +754,13 @@ class BoardBuilder:
             if self._tag_type == "apriltag":
                 board = AprilTagBoard(
                     objPoints=np.array(marker_corners_list, np.float32),
-                    dictionary=self._detector._tag_family,
+                    dictionary=self._detector.tag_family,
                     ids=np.array(marker_ids_list),
                 )
             elif self._tag_type == "aruco":
-                board = cv2.aruco.Board_create(
+                board = cv2.aruco.Board(
                     objPoints=np.array(marker_corners_list, np.float32),
-                    dictionary=self._detector._dictionary,
+                    dictionary=self._detector.tag_family,
                     ids=np.array(marker_ids_list),
                 )
             else:
@@ -702,117 +773,12 @@ class BoardBuilder:
         finally:
             cv2.destroyAllWindows()
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Visualize the scene or track box poses."
-    )
-    parser.add_argument(
-        "--marker_size",
-        type=float,
-        default=0.04,
-        help="Indicate the size of the markers in meters.",
-    )
-    parser.add_argument(
-        "--reference_marker",
-        type=int,
-        default=None,
-        help="Specify the ID of the reference marker.",
-    )
-    parser.add_argument(
-        "--reference_marker_offset",
-        type=str,
-        default=None,
-        help=(
-            "Specify the offset of the board origin from the reference marker "
-            "in the reference marker's coordinate frame as x,y,z in meters "
-            "(e.g., '0.0,0.0,0.0')."
-        ), 
-    )
-    parser.add_argument(
-        "--center_pose",
-        type=bool,
-        default=True,
-        help=(
-            "Specify if the pose should be at the marker with the specified "
-            "ID, or centered between all markers (default True)."
-        ),
-    )
-    parser.add_argument(
-        "--name",
-        type=str,
-        default="board",
-        help="Name of the board.",
-    )
-    parser.add_argument(
-        "--apriltag_family",
-        type=str,
-        default="tagStandard41h12",
-        help="The apriltag family that should be used.",
-    )
-    parser.add_argument(
-        "-c",
-        "--camera_config_path",
-        type=str,
-        help="Path to the camera configuration file.",
-    )
-    parser.add_argument(
-        "--max_id",
-        type=int,
-        help=(
-            "Maximum marker ID to consider, if set any id higher than given "
-            "value will be ignored (optional)."
-        ),
-    )
-
-    args = parser.parse_args()
-
-    
-    # Use real CLI args by default, but allow an easy drop-in debug config via
-    # the DEBUG_ARGS env var (set to "1" to enable).
-    # args = argparse.Namespace(
-    #     camera_config_path="/home/kiran/pose_estimation_ws/robot_ipc_control/robot_ipc_control/configs/test_cam_config.json",
-    #     marker_size=0.032625,
-    #     apriltag_family="tag16h5",
-    #     name="debug_board",
-    #     center_pose=False,
-    #     reference_marker=7,
-    #     # reference_marker=None,
-    #     reference_marker_offset="0.0,0.02175,0.0",
-    #     # reference_marker_offset=None,
-    #     max_id=17,
-    # )
-
-    # Initialize detector
-    detector = BoardBuilder(
-        marker_size=args.marker_size,
-        apriltag_family=args.apriltag_family,
-        camera_config_path=args.camera_config_path,
-        filter_max_id=args.max_id
-    )
-
-    if args.reference_marker_offset is not None:
-        reference_marker_offset = np.array(
-            [float(x) for x in args.reference_marker_offset.split(",")]
-        )
-    else:
-        reference_marker_offset = None
-
-    # Create new board configuration
-    print("Creating new board configuration...")
-    board, marker_corners_list, marker_positions = (
-        detector.create_board_from_detections(
-            center_pose=args.center_pose, 
-            reference_marker=args.reference_marker,
-            reference_marker_offset=reference_marker_offset,
-        )
-    )
-
-    serialized_board = board_to_json(board, args.apriltag_family)
-
-    # Save to JSON
-    with open(f"{args.name}.json", "w") as f:
-        json.dump(serialized_board, f, indent=4)
-
-
-if __name__ == "__main__":
-    main()
+def get_object_board_save_folder() -> Path:
+    root = get_project_root()
+    save_folder = root / "config" / "object_boards"
+    # Create the directory if it doesn't exist
+    if not save_folder.parent.exists():
+        save_folder.parent.mkdir()
+    if not save_folder.exists():
+        save_folder.mkdir()
+    return save_folder

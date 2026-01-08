@@ -36,7 +36,7 @@ class AprilTagDetectorWrapper:
             quad_decimate: float = 1.0, 
             quad_sigma: float = 0.0,
             refine_edges: bool = True, 
-            decode_sharpening: float = 0.25, 
+            maxhamming: int = 0, 
             debug: bool = False) -> None:
         """
         Initializes the AprilTag detector with specified parameters.
@@ -57,13 +57,31 @@ class AprilTagDetectorWrapper:
             debug (bool): 
                 Whether to enable debug mode.
         """
-        self.detector = apriltag(tag_family=tag_family_name,
-                                 nthreads=nthreads,
-                                 quad_decimate=quad_decimate,
-                                 quad_sigma=quad_sigma,
-                                 refine_edges=refine_edges,
-                                 decode_sharpening=decode_sharpening,
-                                 debug=debug)
+        # Package Defaults
+
+        # apriltag(
+        #     family: str,
+        #     threads: int = 1,
+        #     maxhamming: int = 1,
+        #     decimate: float = 2.0,
+        #     blur: float = 0.0,
+        #     refine_edges: bool = True,
+        #     debug: bool = False
+        # )
+        
+        # Read in parameters, defaults are based on good choices from experiments
+        self.detector = apriltag(
+            tag_family_name,
+            threads=nthreads,
+            maxhamming=maxhamming,
+            decimate=quad_decimate,
+            blur=quad_sigma,
+            refine_edges=refine_edges,
+            debug=debug
+        )
+
+        # Save the tag family name
+        self._tag_family_name = tag_family_name
         
         return None
 
@@ -106,6 +124,13 @@ class AprilTagDetectorWrapper:
             ids = None
         
         return corners, ids
+    
+    @property
+    def tag_family(self) -> str:
+        """
+        Returns the tag family used by the detector.
+        """
+        return self._tag_family_name
 
     def _rearrange_corners(
             self,
@@ -182,3 +207,10 @@ class ArucoTagDetectorWrapper:
         corners, ids, _ = cv2.aruco.detectMarkers(
             image, self._dictionary, parameters=self._parameters)
         return corners, ids
+    
+    @property
+    def tag_family(self) -> str:
+        """
+        Returns the tag family used by the detector.
+        """
+        return self._dictionary
