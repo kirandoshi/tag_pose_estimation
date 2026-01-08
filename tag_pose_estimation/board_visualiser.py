@@ -1,12 +1,17 @@
 import json
 import numpy as np
-import argparse
+from pathlib import Path
+import logging
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-def load_single_aruco_board(board_config):
-    with open(board_config, "r") as f:
+from tag_pose_estimation.utils import get_project_root
+
+logger = logging.getLogger(__name__)
+
+def load_single_aruco_board(filepath: str):
+    with open(filepath, "r") as f:
         board_data = json.load(f)
 
     # load ids and corners from config
@@ -68,11 +73,31 @@ def plot_squares(ids, squares):
     ax.legend()
     plt.show()
 
+def visualise_board_from_config(filepath: str):
+    # Handle file validity here
+    # First check if the file path is absolute or relative
+    checked_paths = []
+    path = Path(filepath)
+    checked_paths.append(path)
+    # To check if absolute, check if it exists
+    if not path.exists():
+        # If not absolute, see if its relative to project root
+        path = get_project_root() / filepath
+        checked_paths.append(path)
+        if not path.exists():
+            # If it is not relavtive to project root, see if it is a file in the
+            # object boards folder
+            path = get_project_root() / "config" / "object_boards" / filepath
+            checked_paths.append(path)
+            if not path.exists():
+                # If still not found, raise error
+                # Create a string listing all the paths we checked
+                checked_paths_str = "\n".join([str(p) for p in checked_paths])
+                raise FileNotFoundError(
+                    f"File given as {filepath} not found. \n"
+                    f"Checked the following paths:\n{checked_paths_str}")
+            
+    logger.info(f"Loading board configuration from {path}")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="")
-    parser.add_argument("filepath", nargs="?", default="default", help="filepath")
-    args = parser.parse_args()
-
-    ids, corners = load_single_aruco_board(args.filepath)
+    ids, corners = load_single_aruco_board(str(path))
     plot_squares(ids, corners)
