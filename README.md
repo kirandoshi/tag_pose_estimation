@@ -50,6 +50,12 @@ v4l2-ctl --list-devices
 ### Object board creation
 To be able to estimate the pose of an object, we need to define the geometry of
 the arrangement of tags on the object.
+The tags themselves can be either Aruco or AprilTags and need to be printed and
+then attached to the object. 
+Websites such as this [Aruco Marker Generator](https://chev.me/arucogen/) or
+this [AprilTag Generator](https://chaitanyantr.github.io/apriltag.html) can be
+used to generate and download the markers for printing. Using a svg editor they
+can be arranged as desired in a GUI and then printed.
 To simply create such a board definition file, we provide a script
 ```
 python scripts/build_object_board.py 
@@ -78,6 +84,17 @@ reference marker if provided.
 see script help for more information).
 The resulting board definition file will be saved in the `configs/object_boards` 
 folder.
+
+The generated board definition file can be inspected visually using the
+script
+```
+python scripts/visualise_board.py --filepath [path to board definition file]
+```
+If the board doesn't look as expected, especially if tags which should be aligned
+are shifted strongly relative to each other, it is recommended to re-create the 
+board as this inaccuracy will directly affect the pose estimation accuracy.
+The accuracy of the camera calibration also should be checked in this case.
+
 ### Calibration of the robot base position
 The robot base position relative to the 0-position can be calibrated using
 ```
@@ -102,30 +119,3 @@ python3 pose_estimation/pose_estimator.py --config=[path to env config] --detect
 ```
 
 where the config has to contain the paths to the robot configurations and the camera configuration path(s) - Multiple cameras are supported.
-
-### Visualizing the pose estimation
-A simple script to visualize the pose estimation can be run using
-```
-python3 pose_estimation/visualize_pose_estimation.py  --mode=threaded_tracking --config [path to env config]
-```
-
-### Example of an environment config file
-```
-{
-  "port": 5557,
-  "cameras": [
-    {
-      "type": "D405",
-      "serial_number": "238722073187",
-      "calibration_file": "./calibration/238722073187_20250605_105751_homogenous_transform.npy"
-    }
-  ],
-  "robots": ["./calibration/20250605_110533_base_pose_robot_right.npy"],
-  "boards": [
-    "./configs/boards/cube_1.json",
-    "./configs/boards/cube_2.json",
-    "./configs/boards/cube_3.json"
-  ]
-}
-
-```
