@@ -1,4 +1,5 @@
 import argparse
+import logging
 
 from tag_pose_estimation.intrinsic_calibration import (
     intrinsic_camera_calibration,
@@ -38,4 +39,9 @@ def main():
     intrinsic_camera_calibration(args)
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        format=('%(asctime)s | %(name)s | %(levelname)s | %(message)s'), 
+        datefmt='%m/%d/%Y %H:%M:%S', 
+        level=logging.INFO
+    )
     main()

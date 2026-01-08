@@ -3,6 +3,8 @@ import numpy as np
 
 from pathlib import Path
 import datetime
+import logging
+import sys
 
 from tag_pose_estimation.utils import (
     get_larger_board,
@@ -13,27 +15,26 @@ from tag_pose_estimation.camera_wrappers import (
     WebcamCamera,
 )
 
+# Module logger
+logger = logging.getLogger(__name__)
+
 def intrinsic_camera_calibration(args):
     # Create Charuco board and dictionary
     if args.charuco_board_path and Path(args.charuco_board_path).exists():
         board, aruco_dict = load_charuco_board_from_json(
             args.charuco_board_path)
-        print(f"Loaded Charuco board from {args.charuco_board_path}")
+        logger.info(f"Loaded Charuco board from {args.charuco_board_path}")
     else:
         if args.charuco_board_path:
-            print(f"Charuco board path {args.charuco_board_path} does not exist.")
-            print("Using default intrinsic calibration Charuco board instead.")
-            print("The default board can be found at "
-                  "'config/calibration_boards/default_intrinsic_calibration_board.json'")
+            logger.warning(f"Charuco board path {args.charuco_board_path} does not exist.")
+            logger.info("Using default intrinsic calibration Charuco board instead.")
+            logger.info("The default board can be found at 'config/calibration_boards/default_intrinsic_calibration_board.json'")
         else:
-            print("No Charuco board path provided.")
-            print("Using default intrinsic calibration Charuco board instead.")
-            print("The default board can be found at "
-                  "'config/calibration_boards/default_intrinsic_calibration_board.json'")
-            print("The default board has 3x5 squares with 0.058m square length " 
-                  "and 0.045m marker length.")
-            print("Ensure that the board is printed at the correct scale for "
-                  "accurate calibration.")
+            logger.info("No Charuco board path provided.")
+            logger.info("Using default intrinsic calibration Charuco board instead.")
+            logger.info("The default board can be found at 'config/calibration_boards/default_intrinsic_calibration_board.json'")
+            logger.info("The default board has 3x5 squares with 0.058m square length and 0.045m marker length.")
+            logger.info("Ensure that the board is printed at the correct scale for accurate calibration.")
         board, aruco_dict = load_charuco_board_from_json(
             str(get_project_root() /
                 "config" /
@@ -79,21 +80,21 @@ def intrinsic_camera_calibration(args):
                 all_ids.append(charuco_ids)
                 if img_size is None:
                     img_size = gray.shape[::-1]
-                print(f"Saved frame {len(all_corners)}")
+                logger.info(f"Saved frame {len(all_corners)}")
             else:
-                print("Not enough corners, frame not saved.")
-            print(f"Frames collected: {len(all_corners)}")
+                logger.warning("Not enough corners, frame not saved.")
+            logger.info(f"Frames collected: {len(all_corners)}")
 
         if key == ord('q'):
             break
 
     if len(all_corners) < 15:
-        print(f"Not enough valid frames collected: {len(all_corners)}")
-        print("Need at least 15 frames with detected corners for calibration.")
-        exit(1)
+        logger.error(f"Not enough valid frames collected: {len(all_corners)}")
+        logger.error("Need at least 15 frames with detected corners for calibration.")
+        sys.exit(1)
     else:
-        print(f"Collected {len(all_corners)} valid frames for calibration.")
-        print("Calibrating...")
+        logger.info(f"Collected {len(all_corners)} valid frames for calibration.")
+        logger.info("Calibrating...")
 
     try:
         # Calibrate
@@ -106,14 +107,15 @@ def intrinsic_camera_calibration(args):
             distCoeffs=None,
         )
     except cv2.error as e:
-        print(f"Calibration failed: {e}")
-        print("Ensure that enough valid frames with detected corners were collected.")
-        print("Likely causes: insufficient number of corners or poor corner detection.")
-        print("Try collecting more frames")
+        logger.error(f"Calibration failed: {e}")
+        logger.error("Ensure that enough valid frames with detected corners were collected.")
+        logger.error("Likely causes: insufficient number of corners or poor corner detection.")
+        logger.info("Redo the calibration and try collecting more frames")
+        sys.exit(1)
 
-    print(f"Camera Matrix after calibration:\n{camera_matrix}")
-    print(f"Distortion Coefficients after calibration:\n{dist_coeffs}")
-    print(f"Reprojection error after calibration: {ret}")
+    logger.debug(f"Camera Matrix after calibration:\n{camera_matrix}")
+    logger.debug(f"Distortion Coefficients after calibration:\n{dist_coeffs}")
+    logger.info(f"Reprojection error after calibration: {ret}")
 
     # Unique time id
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -124,7 +126,7 @@ def intrinsic_camera_calibration(args):
     calibration_folder.mkdir()
 
     focus_value = cam.cap.get(cv2.CAP_PROP_FOCUS)
-    print(f"Read focus value at end: {focus_value}")
+    logger.info(f"Read focus value at end: {focus_value}")
 
     # Save to text file
     txt_file_path = calibration_folder / "description.txt"
@@ -140,17 +142,17 @@ def intrinsic_camera_calibration(args):
         f.write("\nFocus Value:\n")
         f.write(str(focus_value))
         f.write(f"\nReprojection error: {ret}\n")
-    print(f"Saved {txt_file_path}")
+    logger.info("Saved %s", txt_file_path)
     # Save focus value to npy
     focus_value_path = calibration_folder / "focus_value.npy"
     np.save(focus_value_path, focus_value)
-    print(f"Saved {focus_value_path}")
+    logger.info(f"Saved {focus_value_path}")
     # Save to .npy
     camera_matrix_path = calibration_folder / "camera_matrix.npy"
     dist_coeffs_path = calibration_folder / "dist_coeffs.npy"
     np.save(camera_matrix_path, camera_matrix)
     np.save(dist_coeffs_path, dist_coeffs)
-    print(f"Saved {camera_matrix_path} and {dist_coeffs_path}")
+    logger.info(f"Saved {camera_matrix_path} and {dist_coeffs_path}")
     cam.release()
 
     return None
