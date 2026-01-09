@@ -1,6 +1,7 @@
 from pathlib import Path
 import cv2
 import json
+import logging
 
 import numpy as np
 
@@ -203,3 +204,35 @@ def load_boards(
         boards.append(board)
 
     return boards
+
+def handle_config_path(
+        config_path: str,
+        relative_folder: Path,
+        logger: logging.Logger = logging.getLogger(__name__),
+) -> str:
+    # Handle file validity here
+    # First check if the file path is absolute or relative
+    checked_paths = []
+    path = Path(config_path)
+    checked_paths.append(path)
+    # To check if absolute, check if it exists
+    if not path.exists():
+        # If not absolute, see if its relative to project root
+        path = get_project_root() / config_path
+        checked_paths.append(path)
+        if not path.exists():
+            # If it is not relavtive to project root, see if it is a file in the
+            # specified folder
+            path = get_project_root() / relative_folder / config_path
+            checked_paths.append(path)
+            if not path.exists():
+                # If still not found, raise error
+                # Create a string listing all the paths we checked
+                checked_paths_str = "\n".join([str(p) for p in checked_paths])
+                raise FileNotFoundError(
+                    f"File given as {config_path} not found. \n"
+                    f"Checked the following paths:\n{checked_paths_str}")
+
+    logger.info(f"Loading board configuration from {path}")
+
+    return str(path)

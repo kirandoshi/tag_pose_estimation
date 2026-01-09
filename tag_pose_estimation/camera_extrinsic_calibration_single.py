@@ -3,50 +3,74 @@ import numpy as np
 import cv2
 import cv2.aruco as aruco
 
-import pyrealsense2 as rs
-
 import time
 import datetime
 
 import json
-import argparse
 
 import sys
 import os
+from pathlib import Path
+import logging
 
 from tag_pose_estimation.transform_utils import (
     pose_to_homogeneous,
 )
 from tag_pose_estimation.camera_wrappers import (
     RealSenseCamera,
+    T265RealSenseCamera,
     WebcamCamera,
 )
-from tag_pose_estimation.utils import get_larger_board
+from tag_pose_estimation.utils import (
+    get_project_root,
+    handle_config_path, 
+    load_charuco_board_from_json
+)
 
-def main():
-    parser = argparse.ArgumentParser(description="Camera calibration with ArUco markers.")
-    parser.add_argument(
-        "--config_path",
-        type=str,
-        default="calibration/camera_config.json",
-        help="Path to camera configuration file.",
+# Module logger
+logger = logging.getLogger(__name__)
+
+def single_camera_extrinsic_calibration(
+        camera_config_path: str,
+        board_config_path: str,
+) -> None:
+    
+    # Check and handle camera config path
+    camera_config_path = handle_config_path(
+        camera_config_path,
+        Path("config") / "camera_config",
+        logger=logger
     )
-        
-    args = parser.parse_args()
-    config_path = args.config_path
 
-    # Open config file
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        print("Error: Config file not found.", file=sys.stderr)
-        sys.exit(1)
+    # The config file should exist now
+    # Load config
+    with open(camera_config_path) as f:
+        config = json.load(f)
 
-    # board that we are using for calibration
-    # board, charuco_marker_dictionary = get_board(True)
-    board, charuco_marker_dictionary = get_larger_board(False)
-    # board, charuco_marker_dictionary = get_even_larger_board(False)
+    # Check and handle board config path
+    board_config_path = handle_config_path(
+        board_config_path,
+        Path("config") / "calibration_boards",
+        logger=logger
+    )
+
+    # Board path is a directory. All boards are stored in a file called charuco_board.json
+    if Path(board_config_path).is_dir():
+        board_config_path = str(
+            Path(board_config_path) / "charuco_board.json"
+        )
+    if not Path(board_config_path).exists():
+        raise FileNotFoundError(
+            f"Board config file {board_config_path} does not exist. "
+            "The provided path must be a directory containing a file called "
+            "'charuco_board.json' "
+        )
+    
+    
+    # Load board
+    board, charuco_marker_dictionary = load_charuco_board_from_json(
+        board_config_path
+    )
 
     # Get camera: either a webcam by cam name or a realsense by serial number
     # If neither is specified, abort.
@@ -66,6 +90,10 @@ def main():
         camera = RealSenseCamera(
             serial_number=serial_number
         )
+    elif camera_dict["type"] == "T265":
+        camera = T265RealSenseCamera(
+            serial_number=serial_number
+        )
     elif camera_dict["type"] == "Webcam":
         camera = WebcamCamera(
             camera_id=serial_number,
@@ -74,10 +102,10 @@ def main():
             focus_path=camera_dict.get("focus_setting")
         )
     else:
-        raise ValueError(f"Unknown camera type {camera_dict['type']}")
+        raise ValueError(f"Unsupported camera type {camera_dict['type']}")
 
     camera_id = camera_dict["name"] if "name" in camera_dict else serial_number
-    print(f"Starting calibration for camera {camera_id}")
+    print(f"Starting extrinsic calibration for camera {camera_id}")
 
     cv2.namedWindow(
         f"Camera {camera_id}", cv2.WINDOW_NORMAL
@@ -127,7 +155,7 @@ def main():
                         frame, camera_matrix, dist_coeffs, rvec, tvec, 0.1
                     )
 
-        cv2.imshow("ArUco Markers", frame)
+        cv2.imshow("ChArUco Markers", frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("c") and ids is not None and retval > 0:
@@ -152,7 +180,7 @@ def main():
             0.1,
         )
 
-        # Aruco boards have the z-axis pointing in a weird direction.
+        # ChAruco boards have the z-axis pointing in a weird direction.
         # We rotate it to make the z positive.
         R_x_180 = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
@@ -180,21 +208,43 @@ def main():
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        # Ensure the calibration folder exists
-        if not os.path.exists("calibration"):
-            os.makedirs("calibration")
+        # Get save folder
+        save_folder = get_extrinsic_calibration_save_folder()
 
-        np.save(f"calibration/{save_id}_{timestamp}_homogenous_transform.npy", hom_cam_pose_in_world_frame)
-        np.save(f"calibration/{save_id}_homogenous_transform.npy", hom_cam_pose_in_world_frame)
+        np.save(
+            save_folder / f"{save_id}_{timestamp}_extrinsic_calib_hom_transform.npy", 
+            hom_cam_pose_in_world_frame
+        )
+        convenience = False
+        if convenience:
+            # Also save with a generic name for convenience
+            np.save(save_folder / f"{save_id}_extrinsic_calib_hom_transform.npy", 
+                    hom_cam_pose_in_world_frame)
+            
+
+        # Save calibration infos to a text file as well
+        txt_file_path = save_folder / f"{save_id}_{timestamp}_extrinsic_calib_description.txt"
+        with open(txt_file_path, "w") as f:
+            f.write("Extrinsic Calibration Results\n")
+            f.write(f"Camera Name/ID: {camera_id}\n")
+            f.write(f"Date and Time: {timestamp}\n\n")
+            f.write("\nCamera Pose (Homogeneous Transformation) in World Frame:\n")
+            f.write(np.array2string(hom_cam_pose_in_world_frame))
 
         print("Calibration successful. Camera parameters saved.")
 
-        cv2.imshow("ArUco Markers", frame)
+        cv2.imshow("ChArUco Markers", frame)
         cv2.waitKey(0)  # Ensure the window stays open
         cv2.destroyAllWindows()
 
-    # we assume knowledge of the board pose wrt. robot base
+        return None
 
-
-if __name__ == "__main__":
-    main()
+def get_extrinsic_calibration_save_folder() -> Path:
+    root = get_project_root()
+    save_folder = root / "config" / "extrinsic_calibration"
+    # Create the directory if it doesn't exist
+    if not save_folder.parent.exists():
+        save_folder.parent.mkdir()
+    if not save_folder.exists():
+        save_folder.mkdir()
+    return save_folder
