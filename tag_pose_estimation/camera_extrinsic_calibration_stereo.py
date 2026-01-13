@@ -3,16 +3,13 @@ import numpy as np
 import cv2
 import cv2.aruco as aruco
 
-import pyrealsense2 as rs
-
 import time
 import datetime
 
 import json
-import argparse
 
-import sys
-import os
+import logging
+from pathlib import Path
 
 from tag_pose_estimation.transform_utils import (
     pose_to_homogeneous,
@@ -24,27 +21,60 @@ from tag_pose_estimation.camera_wrappers import (
     WebcamCamera,
 )
 from tag_pose_estimation.utils import (
+    handle_config_path,
     load_charuco_board_from_json,
-    get_larger_board,
+    get_extrinsic_calibration_save_folder,
 )
 
-def main(config_path, display_image=True):
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        print("Error: Config file not found.", file=sys.stderr)
-        sys.exit(1)
+# Module logger
+logger = logging.getLogger(__name__)
 
-    # Get charuco board path from config
-    charuco_board_path = config.get("charuco_board_path", None)
+def dual_camera_extrinsic_calibration(
+        camera_1_config_path: str,
+        camera_2_config_path: str,
+        board_config_path: str,
+) -> None:
+    display_image = True
+    camera_configs = []
+    for cam_config_path in [camera_1_config_path, camera_2_config_path]:
+        # Check and handle camera config path
+        cam_config_path = handle_config_path(
+            cam_config_path,
+            Path("config") / "camera_config",
+            logger=logger
+        )
+
+        # The config file should exist now
+        # Load config
+        with open(cam_config_path) as f:
+            config = json.load(f)
+            camera_configs.append(config)
+
+    # Check and handle board config path
+    board_config_path = handle_config_path(
+        board_config_path,
+        Path("config") / "calibration_boards",
+        logger=logger
+    )
+
+    # Board path is a directory. All boards are stored in a file called charuco_board.json
+    if Path(board_config_path).is_dir():
+        board_config_path = str(
+            Path(board_config_path) / "charuco_board.json"
+        )
+    if not Path(board_config_path).exists():
+        raise FileNotFoundError(
+            f"Board config file {board_config_path} does not exist. "
+            "The provided path must be a directory containing a file called "
+            "'charuco_board.json' "
+        )
 
     cameras = []
 
     serial_numbers = []
     camera_names = []
 
-    for i, camera_dict in enumerate(config["cameras"]):
+    for i, camera_dict in enumerate(camera_configs):
         serial_number = None
         if "serial_number" in camera_dict:
             serial_number = camera_dict["serial_number"]
@@ -66,22 +96,18 @@ def main(config_path, display_image=True):
                 camera_dist_path=camera_dict["dist_coeff"],
                 focus_path=camera_dict.get("focus_setting")
             )
+        else:
+            raise ValueError(f"Unsupported camera type: {camera_dict['type']}")
 
         cameras.append(camera)
         camera_id = camera_dict["name"] if "name" in camera_dict else serial_number
         camera_names.append(camera_id)
 
-    if len(cameras) > 2:
-        raise NotImplementedError
 
-    if charuco_board_path is not None and os.path.exists(charuco_board_path):
-        board, charuco_marker_dictionary = load_charuco_board_from_json(
-            charuco_board_path)
-        print(f"Loaded Charuco board from {charuco_board_path}")
-    else:
-        board, charuco_marker_dictionary = get_larger_board(False)
-        print("Using default larger Charuco board with 4x4 markers on 5x4 grid,"
-              " marker length 0.04216 m.")
+    # Load board
+    board, charuco_marker_dictionary = load_charuco_board_from_json(
+        board_config_path
+    )
 
     print("Press 'c' to use the current frame for calibration.")
 
@@ -95,7 +121,7 @@ def main(config_path, display_image=True):
         frame_0_draw = frame_0.copy()
         frame_1_draw = frame_1.copy()
 
-        # Detect aruco markers
+        # Detect charuco markers
         gray_0 = cv2.cvtColor(frame_0, cv2.COLOR_BGR2GRAY)
         gray_1 = cv2.cvtColor(frame_1, cv2.COLOR_BGR2GRAY)
         corners_0, ids_0, _ = cv2.aruco.detectMarkers(gray_0, charuco_marker_dictionary)
@@ -107,12 +133,11 @@ def main(config_path, display_image=True):
 
         if display_image:
             # Make windows resizable
-            cv2.namedWindow("ArUco Markers 0", cv2.WINDOW_NORMAL)
-            cv2.namedWindow("ArUco Markers 1", cv2.WINDOW_NORMAL)
+            cv2.namedWindow("ChArUco Markers 0", cv2.WINDOW_NORMAL)
+            cv2.namedWindow("ChArUco Markers 1", cv2.WINDOW_NORMAL)
 
-            cv2.imshow("ArUco Markers 0", frame_0_draw)
-            cv2.imshow("ArUco Markers 1", frame_1_draw)
-
+            cv2.imshow("ChArUco Markers 0", frame_0_draw)
+            cv2.imshow("ChArUco Markers 1", frame_1_draw)
         key = cv2.waitKey(1) & 0xFF
         if key == ord("c"):
             frames_0.append(frame_0)
@@ -250,7 +275,7 @@ def main(config_path, display_image=True):
         0.1,
     )
 
-    # Aruco boards have the z-axis pointing in a weird direction.
+    # ChAruco boards have the z-axis pointing in a weird direction.
     # We rotate it to make the z positive.
     R_x_180 = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
@@ -287,31 +312,64 @@ def main(config_path, display_image=True):
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Ensure the calibration folder exists
-    if not os.path.exists("calibration"):
-        os.makedirs("calibration")
+    # Get save folder
+    save_folder = get_extrinsic_calibration_save_folder()
+    convenience = False
 
     np.save(
-        f"calibration/{camera_names[0]}_{timestamp}_homogenous_transform.npy",
+        (
+            save_folder / 
+            f"{camera_names[0]}_{timestamp}_extrinsic_calib_hom_transform.npy"
+        ),
         hom_cam_pose_in_world_frame,
     )
-    np.save(
-        f"calibration/{camera_names[0]}_homogenous_transform.npy",
+    
+    if convenience:
+        # Also save with a generic name for convenience
+        np.save(
+        (
+            save_folder / 
+            f"{camera_names[0]}_extrinsic_calib_hom_transform.npy"
+        ),
         hom_cam_pose_in_world_frame,
+    )
+    
+    np.save(
+        (
+            save_folder / 
+            f"{camera_names[1]}_{timestamp}_extrinsic_calib_hom_transform.npy"
+        ),
+        other_camera_pose_world_frame,
+    )
+
+    if convenience:
+        # Also save with a generic name for convenience
+        np.save(
+            (
+                save_folder / 
+                f"{camera_names[1]}_extrinsic_calib_hom_transform.npy"
+            ),
+            other_camera_pose_world_frame,
+        )
+    
+    # Save the relative transform as well
+    # This represents the pose of camera 1 in camera 2 frame (convention by 
+    # OpenCV)
+    rel_pose_save_name = (
+        f"{camera_names[1]}_to_{camera_names[0]}_{timestamp}_"
+        "rel_hom_transform.npy"
     )
 
     np.save(
-        f"calibration/{camera_names[1]}_{timestamp}_homogenous_transform.npy",
-        other_camera_pose_world_frame,
-    )
-    np.save(
-        f"calibration/{camera_names[1]}_homogenous_transform.npy",
-        other_camera_pose_world_frame,
+        save_folder / rel_pose_save_name,
+        other_camera_relative_pose,
     )
 
     # Save calibration transforms to a text file
-    with open(f"calibration/calibration_{timestamp}_results.txt", "w") as f:
-        f.write("Multi-Camera Calibration Results\n")
+    save_id = f"{camera_names[0]}_{camera_names[1]}"
+    txt_file_path = save_folder / (f"{save_id}_{timestamp}_extrinsic_calib_description.txt")
+    with open(txt_file_path, "w") as f:
+        f.write("Dual Camera Calibration Results\n")
         f.write(f"Camera Names/IDs: {camera_names[0]}, {camera_names[1]}\n")
         f.write(f"Date and Time: {timestamp}\n\n")
         f.write("Board Pose in Camera Frame (Homogeneous Transformation):\n")
@@ -323,11 +381,8 @@ def main(config_path, display_image=True):
         f.write("Camera 2 Pose in World Frame (Homogeneous Transformation):\n")
         f.write(np.array2string(other_camera_pose_world_frame))
         f.write("\n\n")
-        f.write("Stereo Calibration Rotation Matrix:\n")
-        f.write(np.array2string(R))
-        f.write("\n\n")
-        f.write("Stereo Calibration Translation Vector:\n")
-        f.write(np.array2string(T))
+        f.write("Pose of Camera 1 in Camera 2 Frame (Homogeneous Transformation):\n")
+        f.write(np.array2string(other_camera_relative_pose))
         f.write("\n")
         f.write("Reprojection Error:\n")
         f.write(str(reprojection_error))
@@ -336,21 +391,8 @@ def main(config_path, display_image=True):
     print("Calibration successful. Camera parameters saved.")
 
     if display_image:
-        cv2.imshow("ArUco Markers", frame)
+        cv2.imshow("ChArUco Markers", frame)
         cv2.waitKey(0)  # Ensure the window stays open
         cv2.destroyAllWindows()
 
     return None
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Calibrate multiple cameras.")
-    parser.add_argument(
-        "-c",
-        "--config_path",
-        type=str,
-        default="./pose_estimation/pose_estimation_config.json",
-        help="Path to the configuration file.",
-    )
-    
-    args = parser.parse_args()
-    main(args.config_path)

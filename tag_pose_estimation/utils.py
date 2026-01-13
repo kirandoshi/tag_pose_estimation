@@ -236,3 +236,14 @@ def handle_config_path(
     logger.info(f"Loading board configuration from {path}")
 
     return str(path)
+
+
+def get_extrinsic_calibration_save_folder() -> Path:
+    root = get_project_root()
+    save_folder = root / "config" / "extrinsic_calibration"
+    # Create the directory if it doesn't exist
+    if not save_folder.parent.exists():
+        save_folder.parent.mkdir()
+    if not save_folder.exists():
+        save_folder.mkdir()
+    return save_folder
