@@ -69,6 +69,34 @@ the information about camera model and further required parameters such as the
 intrinsic calibration parameters (thus intrinsic calibration needs to be performed
 beforehand). An example camera config file can be found in
 `configs/camera_config/default_webcam_config.json`.
+Only a single image is needed (and used) to compute the extrinsics, so make sure
+that the calibration board is fully visible in the camera frame when taking the
+snapshot. The resulting extrinsic calibration file will be saved in the 
+`configs/extrinsic_calibration` folder.
+
+Dual camera extrinsic calibration can be performed using the script
+```
+python scripts/calibrate_extrinsics_dual_camera.py --camera_1_config_path 
+[path to first camera config file] --camera_2_config_path [path to second camera 
+config file] --board_config_path [path to board config file]
+```
+Arguments are similar to the single camera extrinsic calibration script, but
+the config files for both cameras need to be provided. The resulting extrinsic
+calibration files will be saved in the `configs/extrinsic_calibration` folder. 
+The script generates the poses of both cameras in the board frame as well as 
+the relative pose between the two cameras. To calibrate these two cameras, multiple
+frames with both cameras seeing the calibration board need to be taken while 
+running the calibration script. Follow the instructions provided by the script in 
+the terminal. Images should be taken from different viewpoints to get a good 
+calibration result. The quality of the resulting calibration can be seen in the 
+printed reprojection error.
+
+The relative pose between the two cameras is saved in a separate file
+`[camera_2_name]_to_[camera_1_name]_extrinsics.json`. This homogeneous transform
+represents the pose of camera 1 in the frame of camera 2 (i.e. T_camera2_camera1).
+The convention is carried over from the OpenCV function which returns the 
+extrinsic calibration. Use this transform to chain multiple cameras together if
+needed.
 
 ### Object board creation
 To be able to estimate the pose of an object, we need to define the geometry of
