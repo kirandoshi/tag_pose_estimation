@@ -22,9 +22,9 @@ from tag_pose_estimation.camera_wrappers import (
     WebcamCamera,
 )
 from tag_pose_estimation.utils import (
-    get_project_root,
     handle_config_path, 
-    load_charuco_board_from_json
+    load_charuco_board_from_json,
+    get_extrinsic_calibration_save_folder,
 )
 
 # Module logger
@@ -238,13 +238,3 @@ def single_camera_extrinsic_calibration(
         cv2.destroyAllWindows()
 
         return None
-
-def get_extrinsic_calibration_save_folder() -> Path:
-    root = get_project_root()
-    save_folder = root / "config" / "extrinsic_calibration"
-    # Create the directory if it doesn't exist
-    if not save_folder.parent.exists():
-        save_folder.parent.mkdir()
-    if not save_folder.exists():
-        save_folder.mkdir()
-    return save_folder
