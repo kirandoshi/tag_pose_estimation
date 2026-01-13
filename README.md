@@ -1,7 +1,5 @@
 # Tag Pose Estimation
-Author: Valentin Hartmann, Kiran Doshi. CRL, ETH Zurich, 2025.
-
-Initial Readme copied from current pose estimation repo - needs to be updated.
+Author: Valentin Hartmann, Kiran Doshi. Computational Robotics Lab, ETH Zurich, 2026.
 
 ## ToDos and Open Questions Repo
 - Keep support for aruco and apriltag or only apriltag?
@@ -45,7 +43,32 @@ v4l2-ctl --list-devices
 (You might need to install v4l-utils package `sudo apt install v4l-utils`).
 
 ### Extrinsic camera calibration
-*Section to be updated*
+
+To estimate the pose of tags in a common world frame, the camera extrinsics
+need to be determined in that frame.
+To do this either a script for a single camera extrinsic calibration can be used
+or a script which works for exactly two cameras only. For more than two cameras,
+the extrinsics can either be determined pairwise or the single camera extrinsic
+calibration script can be used for each camera individually, but then the 
+calibration board needs to be visible in each camera frame.
+Only the script for single and dual camera extrinsic calibration is currently
+available. Chaining multiple cameras has to be done manually, as it will depend
+on the exact camera setup and which cameras have overlapping fields of view.
+The dual camera extrinsic calibration script provides the relative pose between
+the two cameras which can be used to chain multiple cameras together.
+
+Single camera extrinsic calibration can be performed using the script
+```
+python scripts/calibrate_extrinsics_single_camera.py --camera_config_path 
+[path to camera config file] --board_config_path [path to board config file]
+```
+where the board config file defines the geometry of the Charuco calibration board
+used for the extrinsic calibration (see Intrinsic camera calibration section for
+more information on Charuco board generation). The camera config file contains
+the information about camera model and further required parameters such as the
+intrinsic calibration parameters (thus intrinsic calibration needs to be performed
+beforehand). An example camera config file can be found in
+`configs/camera_config/default_webcam_config.json`.
 
 ### Object board creation
 To be able to estimate the pose of an object, we need to define the geometry of
@@ -96,6 +119,8 @@ board as this inaccuracy will directly affect the pose estimation accuracy.
 The accuracy of the camera calibration also should be checked in this case.
 
 ### Calibration of the robot base position
+*Section to be updated*
+
 The robot base position relative to the 0-position can be calibrated using
 ```
 python3 pose_estimation/robot_base_calibration.py --name [name] --robot_config_path [path to robot config] -s [camera serial number]
@@ -113,6 +138,8 @@ The calibration tool that is used needs to mounted on the correct side.
 The robot configuration will be saved in the 'calibration' folder.
 
 ### Running pose estimation
+*Section to be updated*
+
 The pose estimation process can be run with
 ```
 python3 pose_estimation/pose_estimator.py --config=[path to env config] --detection_type=ransac_with_refinement
