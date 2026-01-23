@@ -276,14 +276,41 @@ def update_board_poses(board_pose_measurements):
     
 def pose_estimator_runner(
         pose_estimation_config_path: str, 
-        tag_type: str,
-        tag_family: str,
-        goal_frequency=10, 
-        detection_type="standard", 
-        publish_image=False,
-        use_additional_transform=False
+        tag_type: str | None = None,
+        tag_family: str | None = None,
+        goal_frequency: int | None = None, 
+        detection_type: str | None = None,
+        publish_image: bool | None = None,
+        use_additional_transform: bool | None = None,
     ):
-    # Set up the detector
+    # Ensure config path is valid
+    pose_estimation_config_path = handle_config_path(
+        pose_estimation_config_path,
+        Path("config") / "pose_estimation_configs",
+        logger=logger
+    )
+    # Load pose estimation config
+    with open(pose_estimation_config_path) as f:
+        config = json.load(f)
+    
+    # Ensure the arguments are set, either from function arguments or config file
+    def _load_param(name, arg):
+        if arg is not None:
+            return arg
+        val = config.get(name)
+        if val is None:
+            raise ValueError(f"{name} must be specified either in the function argument or in the config file.")
+        return val
+
+    tag_type = _load_param("tag_type", tag_type)
+    tag_family = _load_param("tag_family", tag_family)
+    goal_frequency = _load_param("goal_frequency", goal_frequency)
+    detection_type = _load_param("detection_type", detection_type)
+    publish_image = _load_param("publish_image", publish_image)
+    use_additional_transform = _load_param(
+        "use_additional_transform", use_additional_transform)
+
+    # Set up the tag detector
     if tag_type == "apriltag":
         detector = AprilTagDetectorWrapper(
             tag_family_name=tag_family,
@@ -295,16 +322,6 @@ def pose_estimator_runner(
         )
     else:
         raise ValueError(f"Unsupported tag type: {tag_type}")
-    
-    pose_estimation_config_path = handle_config_path(
-        pose_estimation_config_path,
-        Path("config") / "pose_estimation_configs",
-        logger=logger
-    )
-
-    # Load pose estimation config
-    with open(pose_estimation_config_path) as f:
-        config = json.load(f)
         
     camera_configs = config.get("camera_configs", [])
     
