@@ -170,7 +170,23 @@ The robot configuration will be saved in the 'calibration' folder.
 
 The pose estimation process can be run with
 ```
-python3 pose_estimation/pose_estimator.py --config=[path to env config] --detection_type=ransac_with_refinement
+python3 pose_estimation/run_pose_estimation.py --config=[path to pose estimation config file]
 ```
 
-where the config has to contain the paths to the robot configurations and the camera configuration path(s) - Multiple cameras are supported.
+where the config has to contain the "camera_configs": a list of paths which point
+to the camera configuration files, as well as the "object_board_definitions": a
+list of paths which point to the object board definition files and "port" an int
+which specifies the ZMQ port to use for publishing the estimated poses.
+Additional optional arguments are
+```
+--tag_type [apriltag or aruco]
+--tag_family [tag family, e.g. tag36h11 for apriltag, DICT_4X4_50 for aruco]
+--frequency [frequency to run the pose estimation at]
+--publish_image [whether to publish the images additionally with the pose estimation]
+--use_transform [whether to use an additional transform from the config]
+```
+these arguments can either be provided from the command line or specified in the
+config file. The values provided from the command line will override the values
+in the config file. The config file should be saved in the 
+`configs/pose_estimation_configs` folder, an example config file can be found
+there as well.
