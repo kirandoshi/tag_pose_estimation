@@ -305,11 +305,11 @@ def pose_estimator_runner(
 
     tag_type = _load_param("tag_type", tag_type)
     tag_family = _load_param("tag_family", tag_family)
-    goal_frequency = _load_param("goal_frequency", goal_frequency)
+    goal_frequency = _load_param("frequency", goal_frequency)
     detection_type = _load_param("detection_type", detection_type)
     publish_image = _load_param("publish_image", publish_image)
     use_additional_transform = _load_param(
-        "use_additional_transform", use_additional_transform)
+        "use_transform", use_additional_transform)
 
     # Set up the tag detector
     if tag_type == "apriltag":
@@ -392,7 +392,10 @@ def pose_estimator_runner(
     boards = load_boards(board_definitions, tag_type)
 
     if use_additional_transform:
-        transform_file = config["pose_estimation_frame_transform"]
+        transform_file = config.get("pose_estimation_frame_transform", None)
+        if transform_file is None:
+            raise ValueError("use_additional_transform is set to True, but "
+                             "no transform file is provided in the config.")
         # This loaded transformation will be applied as a transformation from
         # the world frame to the specified frame
         T_W_SF = np.load(transform_file)
