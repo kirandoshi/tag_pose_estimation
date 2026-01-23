@@ -36,9 +36,11 @@ repository, run
 ./install_apriltag.sh
 ```
 This will clone the apriltag repository, build the library and create the python
-bindings. 
+bindings. Ensure that this is done at the top level so the resulting import
+paths work correctly. If import errors occur when trying to use the apriltag
+detector, check this step again.
 
-Finally, install the tag-pose-estimation package in editable mode
+Finally, install this package in editable mode
 ```
 pip install -e .
 ```
