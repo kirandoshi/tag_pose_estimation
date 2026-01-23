@@ -3,7 +3,6 @@
 .chache/**
 *.idx
 *.json
-*.txt
 *.pdf
 *.png
 
@@ -13,9 +12,10 @@ __pycache__/
 venv/
 
 # Apriltag package
-python_apriltag/
+apriltag/
 
 # Allow the default calibration files to be tracked
+config/
 !config/calibration_boards/default_intrinsic_calibration_board/*.json
 !config/calibration_boards/default_intrinsic_calibration_board/*.pdf
 !config/calibration_boards/default_intrinsic_calibration_board/*.png

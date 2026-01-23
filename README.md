@@ -13,6 +13,36 @@ Author: Valentin Hartmann, Kiran Doshi. Computational Robotics Lab, ETH Zurich, 
 - Separate scripts which run code from library code, put scripts in a 'scripts' 
   folder outside of the main package folder
 
+## Installation
+To use the pose estimation code, first clone the repository
+```
+git clone https://github.com/yourusername/tag-pose-estimation.git
+```
+
+Then create a python virtual environment and activate it
+```
+python3 -m venv venv
+source venv/bin/activate
+```
+Install the required dependencies using pip
+```
+pip install -r requirements.txt
+```
+
+Additionally, the apriltag library needs to be cloned and built to create the
+python bindings. Ensure that you have cmake installed. At the top level of this
+repository, run
+```
+./install_apriltag.sh
+```
+This will clone the apriltag repository, build the library and create the python
+bindings. 
+
+Finally, install the tag-pose-estimation package in editable mode
+```
+pip install -e .
+```
+
 ## Getting started with pose estimation
 
 ### Instrinsic camera calibration
