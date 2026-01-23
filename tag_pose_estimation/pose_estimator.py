@@ -101,7 +101,7 @@ def detect_boards_in_camera_frame(
     detector: TagDetectorType,
     camera: CameraType,
     tag_type: str,
-    use_detection_type: str = "ransac_with_refinement",
+    use_detection_type: str,
     prev_guess: dict = {},
 ):      
     poses = {}
@@ -137,121 +137,65 @@ def detect_boards_in_camera_frame(
                     criteria
                 )
 
-        if ids is not None:
-            if use_detection_type == "ransac_with_refinement":
-                obj_points = []  # 3D points
-                img_points = []  # 2D detected corners
+        if ids is None:
+            continue
+        if use_detection_type == "ransac_with_refinement":
+            obj_points = []  # 3D points
+            img_points = []  # 2D detected corners
 
-                for marker_corners, marker_id in zip(corners, ids.flatten()):
-                    if marker_id in board.getIds():
-                        idx = np.where(board.getIds() == marker_id)[0][0]
-                        obj_pts_marker = board.getObjPoints()[idx]  # (4, 3)
+            for marker_corners, marker_id in zip(corners, ids.flatten()):
+                if marker_id in board.getIds():
+                    idx = np.where(board.getIds() == marker_id)[0][0]
+                    obj_pts_marker = board.getObjPoints()[idx]  # (4, 3)
 
-                        obj_points.append(obj_pts_marker)  # (4, 3)
-                        img_points.append(marker_corners[0])  # (4, 2)
+                    obj_points.append(obj_pts_marker)  # (4, 3)
+                    img_points.append(marker_corners[0])  # (4, 2)
 
-                if len(obj_points) > 0:
-                    obj_points = np.vstack(obj_points).astype(np.float32)
-                    img_points = np.vstack(img_points).astype(np.float32)
+            if len(obj_points) > 0:
+                obj_points = np.vstack(obj_points).astype(np.float32)
+                img_points = np.vstack(img_points).astype(np.float32)
 
-                    # SolvePnPRansac
-                    success, rvec, tvec, inliers = cv2.solvePnPRansac(
-                        obj_points,
-                        img_points,
+                # SolvePnPRansac
+                success, rvec, tvec, inliers = cv2.solvePnPRansac(
+                    obj_points,
+                    img_points,
+                    camera.camera_matrix,
+                    camera.dist_coeffs,
+                    reprojectionError=1.5,  # tighten this if needed
+                    # flags=cv2.SOLVEPNP_AP3P,
+                    flags=cv2.SOLVEPNP_ITERATIVE,
+                    iterationsCount=200
+                )
+
+                if not success or inliers is None or (len(inliers) < 4 and len(board.getIds())) > 1:
+                    print("ransac rejected too much")
+
+                else:
+                    obj_inliers = obj_points[inliers[:, 0]]
+                    img_inliers = img_points[inliers[:, 0]]
+
+                    success, rvec, tvec = cv2.solvePnP(
+                        obj_inliers,
+                        img_inliers,
                         camera.camera_matrix,
                         camera.dist_coeffs,
-                        reprojectionError=1.5,  # tighten this if needed
-                        # flags=cv2.SOLVEPNP_AP3P,
+                        rvec=rvec,
+                        tvec=tvec,
+                        useExtrinsicGuess=True,
                         flags=cv2.SOLVEPNP_ITERATIVE,
-                        iterationsCount=200
                     )
-
-                    if not success or inliers is None or (len(inliers) < 4 and len(board.getIds())) > 1:
-                        print("ransac rejected too much")
-
-                    else:
-                        obj_inliers = obj_points[inliers[:, 0]]
-                        img_inliers = img_points[inliers[:, 0]]
-
-                        success, rvec, tvec = cv2.solvePnP(
-                            obj_inliers,
-                            img_inliers,
-                            camera.camera_matrix,
-                            camera.dist_coeffs,
-                            rvec=rvec,
-                            tvec=tvec,
-                            useExtrinsicGuess=True,
-                            flags=cv2.SOLVEPNP_ITERATIVE,
-                        )
-
-                        if success:
-                            pose_world_frame = camera_frame_to_world_frame(
-                                pose_to_homogeneous(rvec, tvec),
-                                camera.homogeneous_transform,
-                            )
-
-                            obj_pts_inliers = obj_points[inliers[:, 0]]
-                            img_pts_inliers = img_points[inliers[:, 0]]
-                            reproj_error = compute_reprojection_error(obj_pts_inliers, img_pts_inliers, rvec, tvec, camera.camera_matrix, camera.dist_coeffs)
-
-                            confidence = compute_confidence(len(img_pts_inliers), reproj_error, len(img_points), 5)
-
-                            poses[i] = {
-                                "position": translation_from_homogenous(
-                                    pose_world_frame
-                                ).tolist(),
-                                "rotation_matrix": rotation_from_homogenous(
-                                    pose_world_frame
-                                ).tolist(),
-                                "confidence": confidence,
-                                "rvec": rvec,
-                                "tvec": tvec
-                            }
-
-            elif use_detection_type == "standard_with_initial_guess":
-                obj_points = []  # 3D points
-                img_points = []  # 2D detected corners
-
-                for marker_corners, marker_id in zip(corners, ids.flatten()):
-                    if marker_id in board.getIds():
-                        idx = np.where(board.getIds() == marker_id)[0][0]
-                        obj_pts_marker = board.getObjPoints()[idx]  # (4, 3)
-
-                        obj_points.append(obj_pts_marker)  # (4, 3)
-                        img_points.append(marker_corners[0])  # (4, 2)
-
-                if len(obj_points) * 4 > 4:
-                    obj_points = np.vstack(obj_points).astype(np.float32)
-                    img_points = np.vstack(img_points).astype(np.float32)
-
-                    if i in prev_guess:
-                        prev_rvec_guess = prev_guess[i][0]
-                        prev_tvec_guess = prev_guess[i][1]
-
-                        success, rvec, tvec = cv2.solvePnP(
-                            obj_points,
-                            img_points,
-                            camera.camera_matrix,
-                            camera.dist_coeffs,
-                            rvec=prev_rvec_guess,
-                            tvec=prev_tvec_guess,
-                            useExtrinsicGuess=True,
-                            flags=cv2.SOLVEPNP_ITERATIVE,
-                        )
-                    else:
-                        success, rvec, tvec = cv2.solvePnP(
-                            obj_points,
-                            img_points,
-                            camera.camera_matrix,
-                            camera.dist_coeffs,
-                            useExtrinsicGuess=False,
-                        )
 
                     if success:
                         pose_world_frame = camera_frame_to_world_frame(
                             pose_to_homogeneous(rvec, tvec),
                             camera.homogeneous_transform,
                         )
+
+                        obj_pts_inliers = obj_points[inliers[:, 0]]
+                        img_pts_inliers = img_points[inliers[:, 0]]
+                        reproj_error = compute_reprojection_error(obj_pts_inliers, img_pts_inliers, rvec, tvec, camera.camera_matrix, camera.dist_coeffs)
+
+                        confidence = compute_confidence(len(img_pts_inliers), reproj_error, len(img_points), 5)
 
                         poses[i] = {
                             "position": translation_from_homogenous(
@@ -260,13 +204,70 @@ def detect_boards_in_camera_frame(
                             "rotation_matrix": rotation_from_homogenous(
                                 pose_world_frame
                             ).tolist(),
-                            "confidence": 1,
+                            "confidence": confidence,
+                            "rvec": rvec,
+                            "tvec": tvec
                         }
 
-                        guess[i] = [rvec, tvec]
-            else:
-                raise ValueError(f"Unknown detection type: "
-                                 f"{use_detection_type}")
+        elif use_detection_type == "standard_with_initial_guess":
+            obj_points = []  # 3D points
+            img_points = []  # 2D detected corners
+
+            for marker_corners, marker_id in zip(corners, ids.flatten()):
+                if marker_id in board.getIds():
+                    idx = np.where(board.getIds() == marker_id)[0][0]
+                    obj_pts_marker = board.getObjPoints()[idx]  # (4, 3)
+
+                    obj_points.append(obj_pts_marker)  # (4, 3)
+                    img_points.append(marker_corners[0])  # (4, 2)
+
+            if len(obj_points) * 4 > 4:
+                obj_points = np.vstack(obj_points).astype(np.float32)
+                img_points = np.vstack(img_points).astype(np.float32)
+
+                if i in prev_guess:
+                    prev_rvec_guess = prev_guess[i][0]
+                    prev_tvec_guess = prev_guess[i][1]
+
+                    success, rvec, tvec = cv2.solvePnP(
+                        obj_points,
+                        img_points,
+                        camera.camera_matrix,
+                        camera.dist_coeffs,
+                        rvec=prev_rvec_guess,
+                        tvec=prev_tvec_guess,
+                        useExtrinsicGuess=True,
+                        flags=cv2.SOLVEPNP_ITERATIVE,
+                    )
+                else:
+                    success, rvec, tvec = cv2.solvePnP(
+                        obj_points,
+                        img_points,
+                        camera.camera_matrix,
+                        camera.dist_coeffs,
+                        useExtrinsicGuess=False,
+                    )
+
+                if success:
+                    pose_world_frame = camera_frame_to_world_frame(
+                        pose_to_homogeneous(rvec, tvec),
+                        camera.homogeneous_transform,
+                    )
+
+                    poses[i] = {
+                        "position": translation_from_homogenous(
+                            pose_world_frame
+                        ).tolist(),
+                        "rotation_matrix": rotation_from_homogenous(
+                            pose_world_frame
+                        ).tolist(),
+                        "confidence": 1,
+                    }
+
+                    guess[i] = [rvec, tvec]
+        else:
+            raise ValueError(f"Unknown detection type: "
+                                f"{use_detection_type}")
 
     return poses, guess, detected_markers
 
