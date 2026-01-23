@@ -1,5 +1,5 @@
 """
-Detector wrappers for AprilTag and Aruco AprilTag detectors.
+Detector wrappers for AprilTag and Aruco detectors.
 
 Provides a common interface for both detectors. The output of the detect()
 method is consistent across both wrappers.
@@ -19,13 +19,10 @@ import sys
 import numpy as np
 import cv2
 
-# Add path to apriltag package
-# Apritag package needs to be located in root/python_apriltag
-
-# If apriltag package is not there, build it following instructions in 
-# TODO Kiran: add link to instructions
+# This import should work if the apriltag repo was installed using the
+# install_apriltag.sh script provided in this package.
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
-from python_apriltag.python_apriltag.apriltag import apriltag
+from apriltag.build.apriltag import apriltag
 
 
 class AprilTagDetectorWrapper:
