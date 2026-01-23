@@ -4,7 +4,6 @@ import time
 import numpy as np
 import json
 import base64
-import warnings
 import logging
 from pathlib import Path
 
@@ -446,7 +445,6 @@ def pose_estimator_runner(
 
                 # Detect markers and estimate poses
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                # gray = frame
 
                 # Poses are in world frame
                 (
