@@ -22,15 +22,15 @@ class CameraWrapperBase:
 class WebcamCamera:
     def __init__(
         self,
-        calibration_path=None,
+        extrinsic_calibration_path=None,
         camera_id=None,
         camera_matrix_path=None,
         camera_dist_path=None,
         focus_path=None,
     ):
-        if calibration_path is not None:
+        if extrinsic_calibration_path is not None:
             self.homogeneous_transform = load_camera_calibration(
-                calibration_path)
+                extrinsic_calibration_path)
         else:
             self.homogeneous_transform = None
 
@@ -126,9 +126,11 @@ class WebcamCamera:
         return None
 
 class T265RealSenseCamera:
-    def __init__(self, 
-                 calibration_path=None, 
-                 serial_number=None):
+    def __init__(
+            self, 
+            extrinsic_calibration_path=None, 
+            serial_number=None
+        ):
         """
         Returns a camera matrix K from librealsense intrinsics
         """
@@ -194,9 +196,9 @@ class T265RealSenseCamera:
         # sensor.set_option(rs.option.enable_auto_exposure, True)
         # sensor.set_option(rs.option.enable_auto_white_balance, True)
         # sensor.set_option(rs.option.sharpness, 100)
-        if calibration_path is not None:
+        if extrinsic_calibration_path is not None:
             self.homogeneous_transform = load_camera_calibration(
-                calibration_path)
+                extrinsic_calibration_path)
         else:
             self.homogeneous_transform = None
 
@@ -214,9 +216,11 @@ class T265RealSenseCamera:
         return None
 
 class RealSenseCamera:
-    def __init__(self, 
-                 calibration_path=None, 
-                 serial_number=None):
+    def __init__(
+            self, 
+            extrinsic_calibration_path=None, 
+            serial_number=None
+        ):
         self.pipeline = rs.pipeline()
         config = rs.config()
 
@@ -258,9 +262,9 @@ class RealSenseCamera:
         # Get distortion coefficients
         self.dist_coeffs = np.array(intrinsics.coeffs, dtype=np.float32)
 
-        if calibration_path is not None:
+        if extrinsic_calibration_path is not None:
             self.homogeneous_transform = load_camera_calibration(
-                calibration_path)
+                extrinsic_calibration_path)
         else:
             self.homogeneous_transform = None
 

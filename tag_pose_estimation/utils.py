@@ -192,6 +192,15 @@ def load_boards(
         Supported types are "aruco", "charuco", and "apriltag".
     """
     boards = []
+    if len(board_types) == 1 and len(board_configs) > 1:
+        # If only one board type is provided, assume all boards are of that type
+        board_types = board_types * len(board_configs)
+    
+    if not len(board_types) == len(board_configs):
+        raise ValueError(
+            "board_types and board_configs must have the same length"
+        )
+
     for board_config, board_type in zip(board_configs, board_types):
         if board_type == "charuco":
             board, _ = load_charuco_board_from_json(board_config)

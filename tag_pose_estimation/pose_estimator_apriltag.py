@@ -4,18 +4,12 @@ import time
 import numpy as np
 import json
 import base64
-import os
-
-import argparse
-
 import warnings
-import sys
+import logging
+from pathlib import Path
 
 import cv2
 import cv2.aruco as aruco
-
-import pyrealsense2 as rs
-from scipy.spatial.transform import Rotation
 
 from tag_pose_estimation.transform_utils import (
     pose_to_homogeneous,
@@ -27,36 +21,27 @@ from tag_pose_estimation.camera_wrappers import (
     T265RealSenseCamera,
     WebcamCamera,
 )
-from tag_pose_estimation.utils import load_boards
+from tag_pose_estimation.utils import (
+    load_boards,
+    handle_config_path,
+)
 from tag_pose_estimation.apriltag_board import AprilTagBoard
-from tag_pose_estimation.apriltag_utils import detections_to_corners_ids
-
-# Add path to apriltag package
-# Apritag package is located in root/python_apriltag
-# This is a bit hacky but works for now
-# This file is located in root/robot_ipc_control/pose_estimation
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
-from python_apriltag.python_apriltag.apriltag import apriltag
+from tag_pose_estimation.detector_wrappers import (
+    AprilTagDetectorWrapper,
+    ArucoTagDetectorWrapper,
+)
 
 # Define camera type
 CameraType = WebcamCamera | RealSenseCamera | T265RealSenseCamera
 
-parameters = cv2.aruco.DetectorParameters()
-# parameters.adaptiveThreshWinSizeMin = 5
-# parameters.adaptiveThreshWinSizeMax = 35
-# parameters.adaptiveThreshWinSizeStep = 10
+# Define tag detector type
+TagDetectorType = AprilTagDetectorWrapper | ArucoTagDetectorWrapper
 
-# parameters.polygonalApproxAccuracyRate = 0.06
-# parameters.relativeCornerRefinmentWinSize = 0.01
+# Define board type
+BoardType = AprilTagBoard | cv2.aruco.Board
 
-# parameters.minCornerDistanceRate = 0.02
-# parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_CONTOUR
-
-# parameters.cornerRefinementWinSize = 6
-# parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
-parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-parameters.relativeCornerRefinmentWinSize = 0.15
-parameters.cornerRefinementMaxIterations = 70
+# Module logger
+logger = logging.getLogger(__name__)
 
 def camera_frame_to_world_frame(obj_in_camera_frame, camera_transform):
     pose_in_world_frame = camera_transform @ obj_in_camera_frame
@@ -65,8 +50,6 @@ def camera_frame_to_world_frame(obj_in_camera_frame, camera_transform):
 def compute_reprojection_error(
     obj_pts, img_pts, rvec, tvec, camera_matrix, dist_coeffs
 ):
-    # obj_pts_inliers = obj_points[inliers[:, 0]]
-    # img_pts_inliers = img_points[inliers[:, 0]]
 
     proj_pts, _ = cv2.projectPoints(obj_pts, rvec, tvec, camera_matrix, dist_coeffs)
 
@@ -114,53 +97,20 @@ def apply_transformation(
 
 def detect_boards_in_camera_frame(
     gray_frame: np.ndarray,
-    boards: list[AprilTagBoard],
+    boards: list[BoardType],
+    detector: TagDetectorType,
     camera: CameraType,
-    board_types: list[str],
-    use_detection_type: str = "ransac",
+    tag_type: str,
+    use_detection_type: str = "ransac_with_refinement",
     prev_guess: dict = {},
-    aruco_dict: cv2.aruco.Dictionary = None,
-):  
-    # Get apriltag dictionary
-    # For now assume all boards use the same apriltag dictionary
-    apriltag_dict = None
-    for board in boards:
-        if apriltag_dict is None:
-            apriltag_dict = board.getDictionary()
-        else:
-            assert apriltag_dict == board.getDictionary(), (
-                "All boards must use the same apriltag dictionary")
-    
-    apriltag_detector = apriltag(
-        apriltag_dict,
-        decimate=1.0,
-        maxhamming=0,
-        threads=4,
-        refine_edges=True
-    )
-    
+):      
     poses = {}
 
     guess = {}
 
     for i, board in enumerate(boards):
-        # corners, ids, rejected = cv2.aruco.detectMarkers(
-        #     gray_frame, used_dict, parameters=parameters
-        # )
-
-        # Output of apriltag detection
-        # {
-        #     'hamming': 0,
-        #     'margin': 45.2,
-        #     'id': 17,
-        #     'center': np.array([320.5, 240.5]),
-        #     'lb-rb-rt-lt': np.array([[300, 250], [340, 250], [340, 230], [300, 230]])
-        # },
-
-        # Detect AprilTags
-        detections = apriltag_detector.detect(gray_frame)
-
-        corners, ids = detections_to_corners_ids(detections)
+        # Detect Tags
+        corners, ids = detector.detect(gray_frame)
 
         detected_markers = {
             'corners': corners,
@@ -169,6 +119,23 @@ def detect_boards_in_camera_frame(
 
         # Corner refinement not used for apriltag because apriltag has edge
         # refinement built-in
+        # Refine corners for aruco boards only
+        if tag_type == "aruco" and ids is not None and corners:
+
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.01)
+
+            # Window size and zero zone (recommended typical values)
+            win_size = (5, 5)
+            zero_zone = (-1, -1)
+
+            for marker_corners in corners:
+                cv2.cornerSubPix(
+                    gray_frame,
+                    marker_corners,  # This should be float32
+                    win_size,
+                    zero_zone,
+                    criteria
+                )
 
         if ids is not None:
             if use_detection_type == "ransac_with_refinement":
@@ -241,6 +208,62 @@ def detect_boards_in_camera_frame(
                                 "tvec": tvec
                             }
 
+            elif use_detection_type == "standard_with_initial_guess":
+                obj_points = []  # 3D points
+                img_points = []  # 2D detected corners
+
+                for marker_corners, marker_id in zip(corners, ids.flatten()):
+                    if marker_id in board.getIds():
+                        idx = np.where(board.getIds() == marker_id)[0][0]
+                        obj_pts_marker = board.getObjPoints()[idx]  # (4, 3)
+
+                        obj_points.append(obj_pts_marker)  # (4, 3)
+                        img_points.append(marker_corners[0])  # (4, 2)
+
+                if len(obj_points) * 4 > 4:
+                    obj_points = np.vstack(obj_points).astype(np.float32)
+                    img_points = np.vstack(img_points).astype(np.float32)
+
+                    if i in prev_guess:
+                        prev_rvec_guess = prev_guess[i][0]
+                        prev_tvec_guess = prev_guess[i][1]
+
+                        success, rvec, tvec = cv2.solvePnP(
+                            obj_points,
+                            img_points,
+                            camera.camera_matrix,
+                            camera.dist_coeffs,
+                            rvec=prev_rvec_guess,
+                            tvec=prev_tvec_guess,
+                            useExtrinsicGuess=True,
+                            flags=cv2.SOLVEPNP_ITERATIVE,
+                        )
+                    else:
+                        success, rvec, tvec = cv2.solvePnP(
+                            obj_points,
+                            img_points,
+                            camera.camera_matrix,
+                            camera.dist_coeffs,
+                            useExtrinsicGuess=False,
+                        )
+
+                    if success:
+                        pose_world_frame = camera_frame_to_world_frame(
+                            pose_to_homogeneous(rvec, tvec),
+                            camera.homogeneous_transform,
+                        )
+
+                        poses[i] = {
+                            "position": translation_from_homogenous(
+                                pose_world_frame
+                            ).tolist(),
+                            "rotation_matrix": rotation_from_homogenous(
+                                pose_world_frame
+                            ).tolist(),
+                            "confidence": 1,
+                        }
+
+                        guess[i] = [rvec, tvec]
             else:
                 raise ValueError(f"Unknown detection type: "
                                  f"{use_detection_type}")
@@ -251,17 +274,57 @@ def detect_boards_in_camera_frame(
 def update_board_poses(board_pose_measurements):
     return board_pose_measurements
     
-def main(config_path, 
-         goal_frequency=10, 
-         detection_type="standard", 
-         publish_image=False,
-         use_additional_transform=False):
-    try:
-        with open(config_path) as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        print("Error: Config file not found.", file=sys.stderr)
-        sys.exit(1)
+def pose_estimator_runner(
+        pose_estimation_config_path: str, 
+        tag_type: str,
+        tag_family: str,
+        goal_frequency=10, 
+        detection_type="standard", 
+        publish_image=False,
+        use_additional_transform=False
+    ):
+    # Set up the detector
+    if tag_type == "apriltag":
+        detector = AprilTagDetectorWrapper(
+            tag_family_name=tag_family,
+            refine_edges=True
+        )
+    elif tag_type == "aruco":
+        detector = ArucoTagDetectorWrapper(
+            tag_family_name=tag_family
+        )
+    else:
+        raise ValueError(f"Unsupported tag type: {tag_type}")
+    
+    pose_estimation_config_path = handle_config_path(
+        pose_estimation_config_path,
+        Path("config") / "pose_estimation_configs",
+        logger=logger
+    )
+
+    # Load pose estimation config
+    with open(pose_estimation_config_path) as f:
+        config = json.load(f)
+        
+    camera_configs = config.get("camera_configs", [])
+    
+    for cam_config_path in camera_configs:
+        # Check and handle camera config path
+        cam_config_path = handle_config_path(
+            cam_config_path,
+            Path("config") / "camera_config",
+            logger=logger
+        )
+
+        # The config file should exist now
+        # Load config
+        with open(cam_config_path) as f:
+            cam_config = json.load(f)
+            camera_configs.append(cam_config)
+    
+    if len(camera_configs) == 0:
+        raise ValueError("No camera configurations provided in the pose "
+                         "estimation config file.")
 
     # Initialize ZMQ context and socket
     pose_publisher_context = zmq.Context()
@@ -269,35 +332,29 @@ def main(config_path,
     box_pose_socket.bind(f"tcp://*:{config['port']}")
 
     # make cameras and load their respective calibrations
-
-    # Initialize webcam
-    # cap = cv2.VideoCapture(0)
-
-    # rvec_path = "./calibration/20250404_103226_rvecs.npy"
-    # tvec_path = "./calibration/20250404_103226_tvecs.npy"
-
     cameras = []
     camera_ids = []
 
-    for camera_dict in config["cameras"]:
-        camera_calibration_file = camera_dict["calibration_file"]
+    for single_cam_config in camera_configs:
+        camera_dict = single_cam_config["cameras"][0]
+        camera_calibration_file = camera_dict["extrinsic_calibration_file"]
         serial_number = None
         if "serial_number" in camera_dict:
             serial_number = camera_dict["serial_number"]
 
         if camera_dict["type"] == "D405":
             camera = RealSenseCamera(
-                calibration_path=camera_calibration_file, 
+                extrinsic_calibration_path=camera_calibration_file, 
                 serial_number=serial_number
             )
         elif camera_dict["type"] == "T265":
             camera = T265RealSenseCamera(
-                calibration_path=camera_calibration_file, 
+                extrinsic_calibration_path=camera_calibration_file, 
                 serial_number=serial_number
             )
         elif camera_dict["type"] == "Webcam":
             camera = WebcamCamera(
-                calibration_path=camera_calibration_file,
+                extrinsic_calibration_path=camera_calibration_file,
                 camera_id=serial_number,
                 camera_matrix_path=camera_dict["camera_matrix"],
                 camera_dist_path=camera_dict["dist_coeff"],
@@ -311,15 +368,10 @@ def main(config_path,
             f"Camera {len(cameras)}", cv2.WINDOW_NORMAL
         )  # explicit window creation
 
-    board_configs = config["boards"]
+    board_definitions = config["object_board_definitions"]
 
     # Load board type
-    # If not specified, assume all are april tag boards
-    board_types = config.get("board_types", ["apriltag"] * len(board_configs))
-    assert len(board_types) == len(board_configs), (
-        "board_types and board_configs must have the same length"
-    )
-    boards = load_boards(board_configs, board_types)
+    boards = load_boards(board_definitions, tag_type)
 
     if use_additional_transform:
         transform_file = config["pose_estimation_frame_transform"]
@@ -339,7 +391,7 @@ def main(config_path,
         print(T_SF_W)
 
     print(f"Pose estimation server started. Publishing to tcp://*:{config['port']}")
-    print(f"Tracking {len(board_configs)} boards")
+    print(f"Tracking {len(board_definitions)} boards")
 
     guess = {}
 
@@ -376,14 +428,16 @@ def main(config_path,
                 # gray = frame
 
                 # Poses are in world frame
-                board_pose_measurements, guess, detected_markers = detect_boards_in_camera_frame(
+                (
+                    board_pose_measurements, guess, detected_markers
+                ) = detect_boards_in_camera_frame(
                     gray,
                     boards,
+                    detector,
                     camera,
-                    board_types,
+                    tag_type,
                     use_detection_type=detection_type,
                     prev_guess=guess,
-                    aruco_dict=None, # Use board-specific dictionaries
                 )
 
                 # currently the identity function -> simple pass-through
@@ -391,7 +445,9 @@ def main(config_path,
                 board_pose_measurements = update_board_poses(board_pose_measurements)
 
                 if use_additional_transform:
-                    board_poses_pub = apply_transformation(board_pose_measurements, T_SF_W)
+                    board_poses_pub = apply_transformation(
+                        board_pose_measurements, T_SF_W
+                    )
                 else:
                     board_poses_pub = board_pose_measurements
 
@@ -422,7 +478,6 @@ def main(config_path,
                         "timestamp": time.time(),
                         "poses": board_poses_pub
                     }
-                    # print(f"Positions: {[v['position'] for _,v in board_poses.items()]}")
                     box_pose_socket.send_json(msg_dict)
                     print(f"Published {len(board_poses_pub)} board poses")
 
@@ -457,48 +512,3 @@ def main(config_path,
         cv2.destroyAllWindows()
         box_pose_socket.close()
         pose_publisher_context.term()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Track pose with a robot.")
-    parser.add_argument(
-        "-c", "--config",
-        type=str,
-        default="./configs/pose_estimation_config.json",
-        help="Path to the configuration file. (Absolute Path)",
-    )
-    parser.add_argument(
-        "-d", "--detection_type",
-        type=str,
-        default="standard_with_initial_guess",
-        help="Path to the configuration file.",
-    )
-    parser.add_argument(
-        "-f", "--frequency",
-        type=int,
-        default=10,
-        help="Path to the configuration file.",
-    )
-    parser.add_argument(
-        "-ut", "--use_transform",
-        action="store_true",
-        help=("Whether to use the additional transform from world frame to a "
-              "given frame, specified in the config with key "
-              "'pose_estimation_frame_transform'.")
-    )
-    parser.add_argument(
-        "-i", "--publish_image",
-        action="store_true",
-        default=True,
-        help="Whether to publish the image."
-    )
-    args = parser.parse_args()
-
-    config_path = args.config
-    main(
-        config_path, 
-        args.frequency, 
-        detection_type=args.detection_type,
-        publish_image=args.publish_image,
-        use_additional_transform=args.use_transform
-    )

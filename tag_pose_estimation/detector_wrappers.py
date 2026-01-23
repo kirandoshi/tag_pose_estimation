@@ -191,6 +191,17 @@ class ArucoTagDetectorWrapper:
         self._parameters.relativeCornerRefinmentWinSize = 0.15
         self._parameters.cornerRefinementMaxIterations = 70
         return None
+    
+    def update_parameters(self, parameters: cv2.aruco.DetectorParameters) -> None:
+        """
+        Updates the detector parameters.
+        
+        Args:
+            parameters (cv2.aruco.DetectorParameters): 
+                The new detector parameters to set.
+        """
+        self._parameters = parameters
+        return None
 
     def detect(
             self, image: np.ndarray) -> tuple[list, list]:
