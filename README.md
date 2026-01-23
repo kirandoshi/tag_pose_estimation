@@ -33,7 +33,7 @@ Additionally, the apriltag library needs to be cloned and built to create the
 python bindings. Ensure that you have cmake installed. At the top level of this
 repository, run
 ```
-./install_apriltag.sh
+bash install_apriltag.sh
 ```
 This will clone the apriltag repository, build the library and create the python
 bindings. Ensure that this is done at the top level so the resulting import
