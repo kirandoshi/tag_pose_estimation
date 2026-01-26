@@ -7,7 +7,7 @@ def main():
         description="Robot base calibration with markers."
     )
     parser.add_argument(
-        "-r", "--robot type",
+        "-r", "--robot_type",
         type=str,
         help="The type of robot that is being calibrated.",
         required=True,
