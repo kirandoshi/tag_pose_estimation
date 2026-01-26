@@ -745,10 +745,10 @@ class BoardBuilder:
                 for i in range(len(marker_corners_list)):
                     marker_corners_list[i] += offset
 
-            with open("marker_output.txt", "w") as f:
-                for marker_id, corners in zip(marker_ids_list, marker_corners_list):
-                    f.write(f"{marker_id}\n")
-                    f.write(f"{corners}\n")
+            # with open("marker_output.txt", "w") as f:
+            #     for marker_id, corners in zip(marker_ids_list, marker_corners_list):
+            #         f.write(f"{marker_id}\n")
+            #         f.write(f"{corners}\n")
 
             # Create board object
             if self._tag_type == "apriltag":
