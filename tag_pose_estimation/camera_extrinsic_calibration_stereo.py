@@ -74,7 +74,8 @@ def dual_camera_extrinsic_calibration(
     serial_numbers = []
     camera_names = []
 
-    for i, camera_dict in enumerate(camera_configs):
+    for i, single_config in enumerate(camera_configs):
+        camera_dict = single_config['cameras'][0]
         serial_number = None
         if "serial_number" in camera_dict:
             serial_number = camera_dict["serial_number"]
