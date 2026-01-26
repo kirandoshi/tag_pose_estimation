@@ -323,9 +323,10 @@ def pose_estimator_runner(
     else:
         raise ValueError(f"Unsupported tag type: {tag_type}")
         
-    camera_configs = config.get("camera_configs", [])
+    camera_configs_paths = config.get("camera_configs", [])
+    camera_configs = []
     
-    for cam_config_path in camera_configs:
+    for cam_config_path in camera_configs_paths:
         # Check and handle camera config path
         cam_config_path = handle_config_path(
             cam_config_path,
