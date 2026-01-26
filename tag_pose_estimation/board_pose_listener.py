@@ -16,7 +16,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from tag_pose_estimation.board_pose_filter import BoardPoseFilter
 
 
-class BoardPoseEstimator:
+class BoardPoseListner:
     box_filters: Dict[str, BoardPoseFilter]
 
     def __init__(self, box_pose_socket_address: str, update_rate: float = 0.01):
