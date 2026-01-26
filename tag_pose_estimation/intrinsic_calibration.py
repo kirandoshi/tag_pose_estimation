@@ -57,6 +57,8 @@ def intrinsic_camera_calibration(args):
     cam.set_focus(args.focus)
 
     captured_frames = []
+    logger.info("Press s to use frame for calibration. Press q when done collecting "
+                "frames. Ensure image viewer is highlighted when pressing.")
 
     while True:
         frame = cam.get_frame()
