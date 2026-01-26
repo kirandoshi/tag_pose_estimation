@@ -3,31 +3,47 @@ import numpy as np
 import cv2
 import cv2.aruco as aruco
 
-import pyrealsense2 as rs
-
-import zmq
 import copy
 
 import json
 
 import sys
-import os
 import time
 import datetime
 
 import argparse
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from tag_pose_estimation.utils import get_larger_board
+
+from tag_pose_estimation.camera_wrappers import (
+    RealSenseCamera,
+    WebcamCamera)
 from tag_pose_estimation.transform_utils import (
     pose_to_homogeneous,
-    seven_d_to_homogeneous,
-    scalar_last_to_scalar_first,
 )
+from tag_pose_estimation.utils import load_boards, get_larger_board
 
 from scipy.spatial.transform import Rotation as R
 
+ROBOT_INSTALLED = False
+
+if ROBOT_INSTALLED:
+    from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
+    from interbotix_common_modules.common_robot.robot import (
+        create_interbotix_global_node,
+        robot_startup,
+        robot_shutdown,
+    )
+    from aloha.robot_utils import move_arm_to_ee_target_pose
+    from aloha.constants import (
+        CA_R_CA_EE,
+        ROT_MAT_CA_EE,
+    )
+    from aloha.utils.utils import get_file, get_src_root
+    from aloha.utils.pose_transformations import (
+        get_inline_pose_from_T,
+        get_T_from_inline_pose,
+    )
 
 def average_pose_estimates(transforms):
     # Extract translations and rotations
@@ -53,51 +69,28 @@ def average_pose_estimates(transforms):
 
     return avg_transform
 
-
-def load_ee_calibration_board(ee_calibration_board_path):
-    def load_single_aruco_board(board_config):
-        with open(board_config, "r") as f:
-            board_data = json.load(f)
-
-        # load which dict from config
-        aruco_dict = cv2.aruco.getPredefinedDictionary(
-            getattr(cv2.aruco, board_data["dictionary"])
-        )
-
-        # load ids and corners from config
-        marker_ids_list = []
-        marker_corners_list = []
-
-        for marker in board_data["markers"]:
-            marker_ids_list.append(marker["id"])
-            marker_corners_list.append(marker["corners"])
-
-        board = cv2.aruco.Board(
-            objPoints=np.array(marker_corners_list, np.float32),
-            dictionary=aruco_dict,
-            ids=np.array(marker_ids_list),
-        )
-
-        return board
-
-    return load_single_aruco_board(ee_calibration_board_path)
-
-
-def perturb_quaternion(q, angle_std_deg=5.0):
+def perturb_quaternion(
+        q, 
+        angle_std_deg=5.0, 
+        rng=None):
     """
     Apply a small random rotational perturbation to a quaternion.
 
     Parameters:
     - q: array-like of shape (4,) — original quaternion (x, y, z, w)
     - angle_std_deg: standard deviation of perturbation angle in degrees
+    - rng: optional, numpy random generator for reproducibility
 
     Returns:
     - perturbed quaternion as a numpy array (x, y, z, w)
     """
     # Generate small random rotation vector (axis-angle), with angle ~ N(0, angle_std_deg)
-    axis = np.random.randn(3)
+    if rng is None:
+        rng = np.random.default_rng(seed=0)
+        print("Creating default rng inside perturb_quaternion with seed 0")
+    axis = rng.standard_normal(3)
     axis /= np.linalg.norm(axis)  # normalize to get random direction
-    angle_rad = np.random.normal(0, np.deg2rad(angle_std_deg))
+    angle_rad = rng.normal(0, np.deg2rad(angle_std_deg))
     delta_rotvec = axis * angle_rad
 
     # Convert original quaternion to scipy Rotation
@@ -111,73 +104,122 @@ def perturb_quaternion(q, angle_std_deg=5.0):
 
 def main(
     name,
-    zmq_ip="127.0.0.1",
-    zmq_controller_port=5555,
-    zmq_state_est_port=5556,
-    camera_serial_number=None,
+    calibration_config_path,
 ):
-    print("setting up robot pose estimation socket")
-    robot_pose_context = zmq.Context()
-    robot_pose_socket = robot_pose_context.socket(zmq.SUB)
-    robot_pose_socket.setsockopt(zmq.CONFLATE, 1)  # Keep only the latest message
-    robot_pose_socket.connect(f"tcp://{zmq_ip}:{zmq_state_est_port}")
-    robot_pose_socket.setsockopt_string(zmq.SUBSCRIBE, "")
+    # Start robot communication 
+    node = create_interbotix_global_node('aloha')
 
-    print("setting up robot control socket")
-    controller_context = zmq.Context()
-    controller_publisher = controller_context.socket(zmq.PUB)
-    controller_publisher.bind(f"tcp://{zmq_ip}:{zmq_controller_port}")
-
-    # board that we are using for calibration
-    # board, charuco_marker_dictionary = get_board()
-    board, charuco_marker_dictionary = get_larger_board(False)
-
-    ee_calibration_board_path = "./calibration/robot_calibration_board.json"
-    ee_board = load_ee_calibration_board(ee_calibration_board_path)
-
-    # Initialize webcam
-    # cap = cv2.VideoCapture(0)
-
-    pipeline = rs.pipeline()
-    config = rs.config()
-
-    if camera_serial_number:
-        config.enable_device(camera_serial_number)
-
-    config.enable_stream(rs.stream.color, 1280, 720, rs.format.bgr8, 30)
-    # config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 30)
-
-    # Start streaming
-    profile = pipeline.start(config)
-
-    # color_sensor = profile.get_device().query_sensors()[0]
-    # color_sensor.set_option(rs.option.enable_auto_exposure, True)
-    # Get the sensor once at the beginning. (Sensor index: 1)
-
-    sensor = pipeline.get_active_profile().get_device().query_sensors()[0]
-
-    # Set the exposure anytime during the operation
-    # sensor.set_option(rs.option.exposure, 10000.000)
-    # sensor.set_option(rs.option.enable_auto_exposure, True)
-    # sensor.set_option(rs.option.enable_auto_white_balance, True)
-    # sensor.set_option(rs.option.sharpness, 100)
-
-    # Get camera intrinsics
-    color_stream = profile.get_stream(rs.stream.color)
-    intrinsics = color_stream.as_video_stream_profile().get_intrinsics()
-
-    # Create camera matrix from intrinsics
-    camera_matrix = np.array(
-        [
-            [intrinsics.fx, 0, intrinsics.ppx],
-            [0, intrinsics.fy, intrinsics.ppy],
-            [0, 0, 1],
-        ],
-        dtype=np.float32,
+    robot = InterbotixManipulatorXS(
+        robot_model='vx300s',
+        robot_name='follower_right',
+        node=node,
+        iterative_update_fk=True,
     )
 
+    robot_startup(node)
+
+    # Load robot base calibration config
+    # Open config file
+    try:
+        with open(calibration_config_path) as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Config file {calibration_config_path} not found.")
+    except json.JSONDecodeError:
+        raise ValueError(f"Config file {calibration_config_path} is not a valid JSON.")
+    
+    # Get boards from config
+    if "boards" not in config or len(config["boards"]) == 0:
+        raise ValueError("No boards specified in the config file.")
+    
+    boards_abs_paths = config["boards"]
+    board_target_types = config.get("target_types", None)
+    assert board_target_types is not None, (
+        "target_types must be specified in the config file."
+    )
+    assert len(board_target_types) == len(boards_abs_paths), (
+        "target_types and boards must have the same length."
+    )
+    board_types = config.get("board_types", None)
+    assert board_types is not None, (
+        "board_types must be specified in the config file."
+    )
+    assert len(board_types) == len(boards_abs_paths), (
+        "board_types and boards must have the same length."
+    )
+
+    # Load the main board and ee_board based on their target types
+    ee_board_path = None
+    ee_board_type = None
+    main_board_path = None
+    main_board_type = None
+    for i, target_type in enumerate(board_target_types):
+        if target_type == "ee_board":
+            if ee_board_path is not None:
+                raise ValueError("Multiple ee_board entries found in config file.")
+            ee_board_path = boards_abs_paths[i]
+            ee_board_type = board_types[i]
+        elif target_type == "main_board":
+            if main_board_path is not None:
+                raise ValueError("Multiple main_board entries found in config file.")
+            main_board_path = boards_abs_paths[i]
+            main_board_type = board_types[i]
+        else:
+            raise ValueError(f"Unknown target type {target_type} in config file.")
+        
+    # Load main board
+    if main_board_path is not None:
+        main_board = load_boards([main_board_path], [main_board_type])[0]
+    else:
+        raise ValueError("No main board specified in the config file.")
+
+    assert main_board_type == "charuco", "Main board must be a charuco board."
+
+    # Get the board dictionary from the loaded board
+    main_board_dictionary = main_board.getDictionary()
+
+    # Board that is used to calibrate the end-effector pose and is mounted to
+    # the end-effector
+    if ee_board_path is not None:
+        ee_board = load_boards([ee_board_path], [ee_board_type])[0]
+    else:
+        raise ValueError("No ee_board specified in the config file.")
+
+    # Get the board dictionary from the loaded board
+    ee_board_dictionary = ee_board.getDictionary()
+
+    # Initialize Camera
+    # If neither is specified, abort.
+    camera_dict_list = config["cameras"]
+
+    if len(camera_dict_list) != 1:
+        print("Error: This script only supports calibrating one camera at a time.", file=sys.stderr)
+        sys.exit(1)
+    
+    camera_dict = camera_dict_list[0]
+
+    serial_number = None
+    if "serial_number" in camera_dict:
+        serial_number = camera_dict["serial_number"]
+
+    if camera_dict["type"] == "D405":
+        camera = RealSenseCamera(
+            serial_number=serial_number
+        )
+    elif camera_dict["type"] == "Webcam":
+        camera = WebcamCamera(
+            camera_id=serial_number,
+            camera_matrix_path=camera_dict["camera_matrix"],
+            camera_dist_path=camera_dict["dist_coeff"],
+            focus_path=camera_dict.get("focus_setting")
+        )
+    else:
+        raise ValueError(f"Unknown camera type {camera_dict['type']}")
+
+    # Get camera matrix
+    camera_matrix = camera.camera_matrix
     # Get distortion coefficients
-    dist_coeffs = np.array(intrinsics.coeffs, dtype=np.float32)
+    dist_coeffs = camera.dist_coeffs
 
     # move robot around a bit
     # take pictures and save robot ee-pose along with it
@@ -186,21 +228,18 @@ def main(
 
     while True:
         # update real state
-        try:
-            robot_start_state = robot_pose_socket.recv_json(flags=zmq.NOBLOCK)
-            print("received robot state")
-        except zmq.Again:
-            pass
+        robot_start_state = robot.arm.get_ee_pose()
+        print("received robot state")
 
         if robot_start_state is not None:
             break
 
-    robot_ee_start_pose = robot_start_state["pos"]
+    robot_ee_start_pose = get_inline_pose_from_T(robot_start_state)
 
     # fill list with poses that we are going to do
-    desired_ee_poses = []
+    desired_ee_poses = [robot_ee_start_pose]
 
-    offset = 0.1
+    offset = 0.075
     dirs = [
         (offset / 2, offset / 2),
         (offset / 2, -offset / 2),
@@ -208,13 +247,16 @@ def main(
         (-offset / 2, offset / 2),
     ]
 
+    # Initialise a numpy rng
+    rng = np.random.default_rng(seed=12)
+
     # square in xy
     for i in range(4):
         pose = copy.deepcopy(robot_ee_start_pose)
         pose[0] += dirs[i][0]
         pose[1] += dirs[i][1]
 
-        perturbed_quat = perturb_quaternion(pose[3:])
+        perturbed_quat = perturb_quaternion(pose[3:], angle_std_deg=1.5, rng=rng)
         pose[3:] = perturbed_quat
 
         desired_ee_poses.append(pose)
@@ -225,12 +267,13 @@ def main(
         pose[0] += dirs[i][0]
         pose[2] += dirs[i][1]
 
-        perturbed_quat = perturb_quaternion(pose[3:])
+        perturbed_quat = perturb_quaternion(pose[3:], angle_std_deg=2.5, rng=rng)
         pose[3:] = perturbed_quat
 
         desired_ee_poses.append(pose)
 
     robot_base_poses = []
+    actual_ee_poses = []
 
     curr_pose_idx = 0
     while True:
@@ -238,25 +281,28 @@ def main(
             break
 
         robot_state = None
+        attempts_to_reach_pose = 0
         while True:
-            command = {"target_ee_pose": list(desired_ee_poses[curr_pose_idx])}
-            # print(f"Sending target pose: {command}")
-            controller_publisher.send_json(command)
+            commanded_pose = desired_ee_poses[curr_pose_idx]
 
-            try:
-                robot_state = robot_pose_socket.recv_json(flags=zmq.NOBLOCK)
-                # print("received robot state")
-            except zmq.Again:
-                pass
+            commanded_ee_target_t = get_T_from_inline_pose(commanded_pose)
+
+            # Set on robot
+            move_arm_to_ee_target_pose(
+                robot, commanded_ee_target_t, moving_time=2.0)
+
+            robot_state = robot.arm.get_ee_pose()
 
             if robot_state is None:
                 continue
 
+            # Convert robot_state to inline pose using get_inline_pose_from_T
+            robot_state_inline_pose = get_inline_pose_from_T(robot_state)
             position_error = np.linalg.norm(
-                np.array(robot_state["pos"][:3])
+                np.array(robot_state_inline_pose[:3])
                 - np.array(desired_ee_poses[curr_pose_idx][:3])
             )
-            q1_inv = R.from_quat(robot_state["pos"][3:]).inv()
+            q1_inv = R.from_quat(robot_state_inline_pose[3:]).inv()
             q_rel = q1_inv * R.from_quat(
                 desired_ee_poses[curr_pose_idx][3:]
             )  # relative rotation from q1 to q2
@@ -264,45 +310,42 @@ def main(
             # Get angle difference in radians:
             angle_diff = q_rel.magnitude()
 
-            if position_error < 1e-2 and angle_diff < 1e-2:
+            if position_error < 9e-2 and angle_diff < 9e-2:
                 curr_pose_idx += 1
 
                 time.sleep(0.5)
                 break
-            # else:
-            #     print(f"Pose diff too big: {position_error}")
+            
+            if attempts_to_reach_pose > 10:
+                print("Failed to reach pose, moving to next one")
+                curr_pose_idx += 1
+                break
 
             time.sleep(0.01)
+            attempts_to_reach_pose += 1
 
         # take picture, estimate board pose, and ee-pose
         max_img_taking_attempts = 10
         for _ in range(max_img_taking_attempts):
-            frames = pipeline.wait_for_frames()
-            color_frame = frames.get_color_frame()
-            frame = np.asanyarray(color_frame.get_data())
-
-            # Capture frame
-            # ret, frame = cap.read()
+            frame = camera.get_frame(flush_buffer=True)
+            # print(f"id(frame): {id(frame)}")
+            if frame is None:
+                print("Camera frame is None, retrying...")
+                time.sleep(0.1)
+                continue
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            corners, ids, _ = aruco.detectMarkers(gray, charuco_marker_dictionary)
+            calib_corners, calib_ids, _ = aruco.detectMarkers(gray, main_board_dictionary)
 
-            if ids is not None:
-                aruco.drawDetectedMarkers(frame, corners, ids)
-
-                # cv2.imshow("Camera image", frame)
-
-                # while True:
-                #     key = cv2.waitKey(1) & 0xFF
-                #     if key == ord("c"):
-                #         break
+            if calib_ids is not None:
+                aruco.drawDetectedMarkers(frame, calib_corners, calib_ids)
 
                 # world frame calibration
                 retval, charuco_corners, charuco_ids = aruco.interpolateCornersCharuco(
-                    corners, ids, gray, board
+                    calib_corners, calib_ids, gray, main_board
                 )
                 if retval > 0:
-                    cv2.drawChessboardCorners(frame, (5, 4), charuco_corners, True)
+                    cv2.drawChessboardCorners(frame, (4, 6), charuco_corners, True)
 
                 if retval > 4:  # Need at least 4 corners
                     rvec = np.zeros((3, 1), dtype=np.float32)
@@ -311,7 +354,7 @@ def main(
                     success = aruco.estimatePoseCharucoBoard(
                         charucoCorners=charuco_corners,
                         charucoIds=charuco_ids,
-                        board=board,
+                        board=main_board,
                         cameraMatrix=camera_matrix,
                         distCoeffs=dist_coeffs,
                         rvec=rvec,
@@ -354,15 +397,87 @@ def main(
                 # ee calibration
                 # detect ee board
                 print("Estimating ee-pose")
-                retval, rvec, tvec = cv2.aruco.estimatePoseBoard(
-                    corners,
-                    ids,
-                    ee_board,
-                    camera_matrix,
-                    dist_coeffs,
-                    None,
-                    None,
+
+                # Detect ee board, which might use a different dictionary
+                ee_corners, ee_ids, _ = aruco.detectMarkers(
+                    gray, ee_board_dictionary
                 )
+                if ee_ids is not None:
+                    aruco.drawDetectedMarkers(frame, ee_corners, ee_ids)
+                else:
+                    print("No ee board markers detected")
+                    continue
+                
+                if ee_board_type == "charuco":
+                    retval, ee_charuco_corners, ee_charuco_ids = aruco.interpolateCornersCharuco(
+                        ee_corners, ee_ids, gray, ee_board, 
+                        cameraMatrix=camera.camera_matrix, 
+                        distCoeffs=camera.dist_coeffs
+                    )
+                    rvec = np.zeros((3, 1), dtype=np.float32)
+                    tvec = np.zeros((3, 1), dtype=np.float32)
+
+                    # Gives back the pose at the top right corner of the board
+                    retval = aruco.estimatePoseCharucoBoard(
+                        ee_charuco_corners,
+                        ee_charuco_ids,
+                        ee_board,
+                        camera.camera_matrix,
+                        camera.dist_coeffs,
+                        rvec,
+                        tvec,
+                    )
+
+                    # Transform from top left corner to board center
+                    if retval:
+                        # Vector from top left corner to board center in
+                        # frame of the board as computed by
+                        # estimatePoseCharucoBoard
+                        # Get the board number of squares in x and y direction
+                        # and the square length
+                        num_squares_x = ee_board.getChessboardSize()[0]
+                        num_squares_y = ee_board.getChessboardSize()[1]
+                        square_length = ee_board.getSquareLength()
+
+                        # Vector from top right corner to board center in
+                        # frame of the board as computed by 
+                        # estimatePoseCharucoBoard
+                        vec_topright_to_center_boardframe = np.array([
+                            (num_squares_x * square_length) / 2,
+                            (num_squares_y * square_length) / 2,
+                            0,
+                        ]).reshape((3, 1))
+                        R_board_to_camera, _ = cv2.Rodrigues(rvec)
+                        t_board_to_camera = tvec
+                        vec_topright_to_center_cameraframe = (
+                            R_board_to_camera @ vec_topright_to_center_boardframe
+                            + t_board_to_camera
+                        )
+                        tvec = vec_topright_to_center_cameraframe
+                        # Orientation of board is 180 degree rotated around 
+                        # x-axis
+                        R_x_180 = np.array(
+                            [[1, 0, 0],
+                             [0, -1, 0],
+                             [0, 0, -1]]
+                        )
+                        R_board_to_camera = R_board_to_camera @ R_x_180
+                        rvec, _ = cv2.Rodrigues(R_board_to_camera)
+                    else:
+                        print("Unable to estimate the ee charuco board pose")
+                        continue
+
+                elif ee_board_type == "aruco":
+                    # Estimate the pose of the ee board
+                    retval, rvec, tvec = cv2.aruco.estimatePoseBoard(
+                        ee_corners,
+                        ee_ids,
+                        ee_board,
+                        camera_matrix,
+                        dist_coeffs,
+                        None,
+                        None,
+                    )
 
                 if retval:
                     cv2.drawFrameAxes(
@@ -373,43 +488,42 @@ def main(
                         hom_cam_pose_in_world_frame @ pose_to_homogeneous(rvec, tvec)
                     )
 
-                    def rot_x(theta):
-                        """Rotation around x-axis by theta radians"""
-                        c, s = np.cos(theta), np.sin(theta)
-                        return np.array(
-                            [[1, 0, 0, 0], [0, c, -s, 0], [0, s, c, 0], [0, 0, 0, 1]]
-                        )
+                    # Construct pose of EE-frame in the frame of the calibration
+                    # adapter
+                    # CA = Calibration adapter frame
+                    # EE = End-effector frame
 
-                    # First rotation: 90° around x-axis
-                    T1 = rot_x(np.pi / 2)
+                    # Rotation between EE-frame and calibration adapter is fixed
+                    # in constants and is known from the design of the adapter
+                    # and the definition of the EE-frame by Trossen
+                    rot = ROT_MAT_CA_EE
 
-                    offset = np.eye(4)
-                    # offset[2, 3] = 0.145
-                    # offset[2, 3] = 0.115
-                    # offset[1, 3] = -0.05
-                    offset[2, 3] = 0.112
-                    offset[1, 3] = -0.055
-                    # print(offset)
+                    # Homogeneous transformation from adapter to EE frame
+                    T_CA_EE = np.eye(4)
+                    T_CA_EE[:3, :3] = rot
 
-                    # Combined transformation (first rotate around x, then around z)
-                    adapter_to_ee_pose = T1 @ offset
+                    # Set the translation part
+                    T_CA_EE[0:3, 3] = CA_R_CA_EE
 
-                    ee_pose_world_frame = (
-                        ee_adapter_pose_world_frame @ adapter_to_ee_pose
+                    # Rename adapter pose in world frame for clarity
+                    T_W_CA = ee_adapter_pose_world_frame
+
+                    # T_W_EE is the pose of the end-effector in the world frame
+                    T_W_EE = (
+                        T_W_CA @ T_CA_EE
                     )
 
-                    # robot_state[pos] is [pos][quat], where quat is xyzw
-                    tmp = scalar_last_to_scalar_first(robot_state["pos"])
+                    # The original by VH converted a 7d pose to a 4x4 homogeneous 
+                    # transformation matrix
+                    # This involves extracting the position and orientation 
+                    # (as a quaternion) and constructing the matrix
+                    # Our robot interface provides the pose as the 4x4 
+                    # homogeneous transformation matrix, so just use that
 
-                    # tmp = copy.deepcopy(robot_state["pos"])
-                    # tmp[3] = robot_state["pos"][6]
-                    # tmp[4] = robot_state["pos"][3]
-                    # tmp[5] = robot_state["pos"][4]
-                    # tmp[6] = robot_state["pos"][5]
-                    ee_pose_robot_frame = seven_d_to_homogeneous(np.array(tmp))
-
-                    robot_base_pose = ee_pose_world_frame @ np.linalg.inv(
-                        ee_pose_robot_frame
+                    # T_W_RB = T_W_EE @ T_EE_RB
+                    # T_EE_RB = inv(T_RB_EE)
+                    robot_base_pose = T_W_EE @ np.linalg.inv(
+                        robot_state
                     )
 
                     cv2.imshow("Camera image", frame)
@@ -427,6 +541,10 @@ def main(
 
                     if use_this_estimate:
                         robot_base_poses.append(robot_base_pose)
+                        actual_ee_poses.append(robot_state)
+
+                    # destroy window
+                    cv2.destroyAllWindows()
 
                     break
                 else:
@@ -435,26 +553,52 @@ def main(
             else:
                 print("Was not able to identify corners.")
 
-    command = {"target_ee_pose": list(robot_ee_start_pose)}
-    # print(f"Sending target pose: {command}")
-    controller_publisher.send_json(command)
+    # Shut down robot
+    robot_shutdown(node)
 
     print("Computed base pose:")
     if len(robot_base_poses) > 1:
+        print(f"Using {len(robot_base_poses)} observations to compute average.")
         # average robot_base_poses:
         estimated_base_pose = average_pose_estimates(robot_base_poses)
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # we export this twice, once as a timed version to have access to a specific version,
-        # and secondly to a generic version, which we generally use in our files.
-        output_filepath = f"./calibration/base_pose_robot_{name}.npy"
-        timed_output_filepath = f"./calibration/{timestamp}_base_pose_robot_{name}.npy"
-        
-        np.save(output_filepath, estimated_base_pose)
+        root = get_src_root()
+        timed_output_filepath = root / (
+            "pose_estimation_scripts/"
+            + f"calibration/{timestamp}_base_pose_robot_{name}.npy")
+
         np.save(timed_output_filepath, estimated_base_pose)
-        
-        print(f"Saved to {output_filepath} and {timed_output_filepath}")
+
+        # Print the base pose as text file as a homogeneous transformation matrix
+        text_output_filepath = root / (
+            "pose_estimation_scripts/"
+            + f"calibration/{timestamp}_base_pose_robot_{name}.txt")
+
+        with open(text_output_filepath, "w") as f:
+            f.write(f"# Robot base pose for robot {name}\n")
+            f.write(f"# Estimated on {datetime.datetime.now().isoformat()}\n")
+            f.write(f"# Using {len(robot_base_poses)} observations\n")
+            f.write(f"Camera type: {camera_dict['type']}\n")
+            f.write(f"Camera id: {serial_number}\n")
+            f.write(f"Camera matrix:\n")
+            f.write(np.array2string(camera_matrix))
+            f.write(f"Distortion coefficients:\n")
+            f.write(np.array2string(dist_coeffs))
+            f.write("\n")
+            f.write(f"Actual end effector poses used in estimation:\n")
+            for pose in actual_ee_poses:
+                f.write(np.array2string(pose))
+                f.write("\n")
+            f.write("\n")
+            f.write("Output:\n")
+            f.write("# 4x4 transformation matrix\n")
+            f.write(np.array2string(estimated_base_pose))
+
+        print(f"Base pose (4x4 transformation matrix):\n{estimated_base_pose}")
+        print(f"Saved to {text_output_filepath}")
+        print(f"Saved to {timed_output_filepath}")
     else:
         print("Did not find a sufficient number of observations.")
 
@@ -470,38 +614,15 @@ if __name__ == "__main__":
         required=True,
     )
     parser.add_argument(
-        "-s", "--serial_number",
+        "-c", "--calibration_config_path",
         type=str,
-        help="Serial number of the camera that should be used for calibration.",
+        help="Path to the calibration config file.",
         required=True,
     )
-    # parser.add_argument(
-    #     "--export_camera_pose",
-    #     type=bool,
-    #     default=False,
-    #     help="Robot config path.",
-    #     required=True,
-    # )
-    parser.add_argument(
-        "-r", "--robot_config_path",
-        type=str,
-        help="Robot config path.",
-        required=True,
-    )
+
     args = parser.parse_args()
-
-    try:
-        with open(args.robot_config_path) as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        print("Error: Config file not found.", file=sys.stderr)
-        sys.exit(1)
-
-    camera_serial_number = args.serial_number
 
     main(
         args.name,
-        zmq_controller_port=config["socket_port"],
-        zmq_state_est_port=config["publisher_port"],
-        camera_serial_number=camera_serial_number,
+        calibration_config_path=args.calibration_config_path
     )
