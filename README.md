@@ -11,8 +11,9 @@ To use the pose estimation code, first clone the repository
 git clone https://github.com/yourusername/tag-pose-estimation.git
 ```
 
-Then create a python virtual environment and activate it
+Then cd into the repository and create a python virtual environment and activate it
 ```
+cd tag-pose-estimation/
 python3 -m venv venv
 source venv/bin/activate
 ```
