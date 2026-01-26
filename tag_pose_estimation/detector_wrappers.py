@@ -22,7 +22,7 @@ import cv2
 # This import should work if the apriltag repo was installed using the
 # install_apriltag.sh script provided in this package.
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
-from apriltag.build.apriltag import apriltag
+from local_apriltag.build.apriltag import apriltag
 
 
 class AprilTagDetectorWrapper:
