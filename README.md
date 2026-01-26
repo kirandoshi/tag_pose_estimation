@@ -156,7 +156,7 @@ a robot interface class in `tag_pose_estimation/robot_interfaces/` which
 implements the abstract methods defined in the class `RobotInterface` in
 `tag_pose_estimation/robot_interfaces/robot_interface.py`. This interface is 
 implemented for the ALOHA robot in 
-`tag_pose_estimation/robot_interfaces/aloha_robot_interface.py`.
+`tag_pose_estimation/robot_interfaces/aloha_robot_interface.py`. Likely you will need to have another process running for the robot itself which can take the commands and move the robot, though this depends on the implementation on the robot interface. For the ALOHA robot this is the case, the robot needs to be running in a different terminal (see ALOHA documentation.)
 
 _(A potential future alteration, which is not currently implemented, is to determine
 the robot base position in the frame of the camera directly, and if the camera
@@ -237,3 +237,22 @@ config file. The values provided from the command line will override the values
 in the config file. The config file should be saved in the 
 `configs/pose_estimation_configs` folder, an example config file can be found
 there as well.
+
+### Using the pose estimate in your pipeline
+With your pose estimation running in its own terminal you are now close to having
+the pose estimate of your objects be useful in your own pipeline. All we need to
+do now is use a subscriber which gets the pose and filters it. This subscriber is
+implemented in `tag_pose_estimation/board_pose_listener.`
+To integrate it into your own script you need to do
+```python
+from tag_pose_estimation.board_pose_listener import BoardPoseListener
+
+address = (f"tcp://localhost:{PORT}") 
+pose_listener = BoardPoseListener(
+    box_pose_socket_address=address,
+    update_rate=UPDATE_RATE
+)
+pose_listener.start()
+pose = pose_listener.get_pose(OBJ_ID)
+```
+where the returned pose is a 1x7 numpy array [x, y, z, qw, qx, qy, qz] with the quaternion in scalar first format
