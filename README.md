@@ -2,16 +2,8 @@
 Author: Valentin Hartmann, Kiran Doshi. Computational Robotics Lab, ETH Zurich, 2026.
 
 ## ToDos and Open Questions Repo
-- Keep support for aruco and apriltag or only apriltag?
-- How to make compatible with different robots? Add a robot wrapper class?
-- Add in readme how to generate the python_apriltag bindings from the C code
-- Merge apriltag and aruco tag files which do the same, e.g. pose_estimator
-- Clean up old files, clean out commented code and unused code in all files
-- Update all docstrings and comments
 - Add type hints to all functions
 - Add unit tests
-- Separate scripts which run code from library code, put scripts in a 'scripts' 
-  folder outside of the main package folder
 
 ## Installation
 To use the pose estimation code, first clone the repository
@@ -130,6 +122,46 @@ The convention is carried over from the OpenCV function which returns the
 extrinsic calibration. Use this transform to chain multiple cameras together if
 needed.
 
+### Calibration of the robot base position
+
+The robot base position relative to the world frame (as defined by a calibration
+board) needs to be determined to be able to determine the pose of an object
+relative to the robot. This can be done using the script
+```
+python3 scripts/calibrate_robot_base_pose.py 
+--robot_type [robot type, e.g. aloha]
+--camera_config_path [path to camera config file]
+--ee_board_path [path to end-effector board definition file]
+--ee_board_tag_type [tag type of the end-effector board, e.g. charuco, aruco, apriltag]
+--world_board_path [path to world board definition file]
+```
+
+where the camera config file contains the intrinsic and extrinsic calibration 
+information of the camera used for the calibration, the end-effector board
+definition file contains the geometry of the tags mounted on the robot's
+end-effector and the world board definition file contains the geometry of the
+tags mounted in the world frame (e.g. on a table). 
+The calibration will save a homogeneous transform representing the pose of the robot
+base in the world frame in an .npy and .txt file in the `configs/extrinsic_calibration/`
+folder. The name of the file will be `[robot_type]_base_pose_(timestamp).npy` and
+`.txt`.
+
+To ensure that the robot base and the cameras are in the same world frame, you 
+have to ensure that the world board used during robot base calibration is not 
+moved compared to the position during the camera extrinsic calibration. 
+
+To ensure that your robot can be calibrated correctly, you need to implement
+a robot interface class in `tag_pose_estimation/robot_interfaces/` which 
+implements the abstract methods defined in the class `RobotInterface` in
+`tag_pose_estimation/robot_interfaces/robot_interface.py`. This interface is 
+implemented for the ALOHA robot in 
+`tag_pose_estimation/robot_interfaces/aloha_robot_interface.py`.
+
+_(A potential future alteration, which is not currently implemented, is to determine
+the robot base position in the frame of the camera directly, and if the camera
+was calibrated extrinsically to the world frame, the robot base position in that 
+world frame can be computed by chaining the transforms)_
+
 ### Object board creation
 To be able to estimate the pose of an object, we need to define the geometry of
 the arrangement of tags on the object.
@@ -178,27 +210,7 @@ are shifted strongly relative to each other, it is recommended to re-create the
 board as this inaccuracy will directly affect the pose estimation accuracy.
 The accuracy of the camera calibration also should be checked in this case.
 
-### Calibration of the robot base position
-*Section to be updated*
-
-The robot base position relative to the 0-position can be calibrated using
-```
-python3 pose_estimation/robot_base_calibration.py --name [name] --robot_config_path [path to robot config] -s [camera serial number]
-```
-
-For this script to work, the impedance controller needs to be started before running the calibration script using
-
-```
-./impedance_controller [path to robot config]
-```
-
-Since the robot moves during the calibration, the other robot should be moved out of the way.
-
-The calibration tool that is used needs to mounted on the correct side.
-The robot configuration will be saved in the 'calibration' folder.
-
 ### Running pose estimation
-*Section to be updated*
 
 The pose estimation process can be run with
 ```
@@ -209,6 +221,8 @@ where the config has to contain the "camera_configs": a list of paths which poin
 to the camera configuration files, as well as the "object_board_definitions": a
 list of paths which point to the object board definition files and "port" an int
 which specifies the ZMQ port to use for publishing the estimated poses.
+This script just ensures that the pose estimation is being published via ZMQ, to
+obtain the estimated poses, see below.
 Additional optional arguments are
 ```
 --tag_type [apriltag or aruco]
