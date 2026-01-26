@@ -1,2 +1,4 @@
 *
 !.gitignore
+# Allow a default pose estimation configuration to be tracked
+!default_pose_estimation_config.json

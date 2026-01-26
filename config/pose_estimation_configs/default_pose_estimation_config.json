@@ -1,0 +1,17 @@
+{
+  "port": 5557,
+  "camera_configs": [
+    "config/camera_config/default_webcam_config.json",
+    "config/camera_config/another_camera_config.json"
+  ],
+  "object_board_definitions": [
+    "config/object_boards/board_aruco_DICT_4X4_50_20260108_150831.json",
+    "config/object_boards/board_aruco_DICT_4X4_50_20260108_150831.json"
+  ],
+  "detection_type": "ransac_with_refinement",
+  "frequency": 15,
+  "use_transform": false,
+  "tag_type": "apriltag",
+  "tag_family": "tag36h11",
+  "publish_image": true
+}

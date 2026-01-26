@@ -1,0 +1,4 @@
+*
+!.gitignore
+# Allow the default board folder to be tracked
+!default_intrinsic_calibration_board/

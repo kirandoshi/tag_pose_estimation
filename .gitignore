@@ -13,9 +13,3 @@ venv/
 
 # Apriltag package
 apriltag/
-
-# Allow the default calibration files to be tracked
-config/
-!config/calibration_boards/default_intrinsic_calibration_board/*.json
-!config/calibration_boards/default_intrinsic_calibration_board/*.pdf
-!config/calibration_boards/default_intrinsic_calibration_board/*.png

@@ -1,0 +1,13 @@
+{
+  "cameras": [
+    {
+      "type": "Webcam",
+      "serial_number": "/dev/video0",
+      "name": "video0",
+      "camera_matrix": "config/intrinsic_calibration/cal_20260108_105301/camera_matrix.npy",
+      "dist_coeff": "config/intrinsic_calibration/cal_20260108_105301/dist_coeffs.npy",
+      "focus_setting": "config/intrinsic_calibration/cal_20260108_105301/focus_value.npy",
+      "extrinsic_calibration_file": "config/extrinsic_calibration/video0_20260109_175722_extrinsic_calib_hom_transform.npy"
+    } 
+  ]
+}
