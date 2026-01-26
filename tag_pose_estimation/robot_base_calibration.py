@@ -1,17 +1,13 @@
-import numpy as np
-
-import cv2
-import cv2.aruco as aruco
-
 import copy
-
-import json
-
-import sys
 import time
 import datetime
+import json
+from pathlib import Path
+import logging
 
-import argparse
+import numpy as np
+import cv2
+import cv2.aruco as aruco
 from scipy.spatial.transform import Rotation as R
 
 from tag_pose_estimation.camera_wrappers import (
@@ -20,11 +16,19 @@ from tag_pose_estimation.camera_wrappers import (
 from tag_pose_estimation.transform_utils import (
     pose_to_homogeneous,
 )
-from tag_pose_estimation.utils import load_boards, get_project_root
+from tag_pose_estimation.utils import (
+    load_boards, get_project_root, 
+    handle_config_path, 
+    load_charuco_board_from_json,
+    get_extrinsic_calibration_save_folder
+)
 from tag_pose_estimation.robot_interface.robot_interface import RobotInterface
 from tag_pose_estimation.robot_interface.aloha_robot_interface import (
     AlohaRobotInterface
 )
+
+# Module logger
+logger = logging.getLogger(__name__)
 
 def average_pose_estimates(transforms):
     # Extract translations and rotations
@@ -83,92 +87,96 @@ def perturb_quaternion(
     return r_perturbed.as_quat()  # returns [x, y, z, w]
 
 
-def main(
-    name,
-    calibration_config_path,
+def calibrate_robot_base(
+    camera_config_path: str,
+    ee_board_path: str,
+    ee_board_type: str,
+    world_board_path: str,
+    robot_type: str,
 ):
     # Start robot communication 
-    robot = RobotInterface()
-
-    # Load robot base calibration config
-    # Open config file
-    try:
-        with open(calibration_config_path) as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Config file {calibration_config_path} not found.")
-    except json.JSONDecodeError:
-        raise ValueError(f"Config file {calibration_config_path} is not a valid JSON.")
-    
-    # Get boards from config
-    if "boards" not in config or len(config["boards"]) == 0:
-        raise ValueError("No boards specified in the config file.")
-    
-    boards_abs_paths = config["boards"]
-    board_target_types = config.get("target_types", None)
-    assert board_target_types is not None, (
-        "target_types must be specified in the config file."
-    )
-    assert len(board_target_types) == len(boards_abs_paths), (
-        "target_types and boards must have the same length."
-    )
-    board_types = config.get("board_types", None)
-    assert board_types is not None, (
-        "board_types must be specified in the config file."
-    )
-    assert len(board_types) == len(boards_abs_paths), (
-        "board_types and boards must have the same length."
-    )
-
-    # Load the main board and ee_board based on their target types
-    ee_board_path = None
-    ee_board_type = None
-    main_board_path = None
-    main_board_type = None
-    for i, target_type in enumerate(board_target_types):
-        if target_type == "ee_board":
-            if ee_board_path is not None:
-                raise ValueError("Multiple ee_board entries found in config file.")
-            ee_board_path = boards_abs_paths[i]
-            ee_board_type = board_types[i]
-        elif target_type == "main_board":
-            if main_board_path is not None:
-                raise ValueError("Multiple main_board entries found in config file.")
-            main_board_path = boards_abs_paths[i]
-            main_board_type = board_types[i]
-        else:
-            raise ValueError(f"Unknown target type {target_type} in config file.")
-        
-    # Load main board
-    if main_board_path is not None:
-        main_board = load_boards([main_board_path], [main_board_type])[0]
+    # Select the robot interface
+    if robot_type == "aloha":
+        robot = AlohaRobotInterface()
     else:
-        raise ValueError("No main board specified in the config file.")
+        # This is just an abstract base class
+        robot = RobotInterface()
 
-    assert main_board_type == "charuco", "Main board must be a charuco board."
+    # Check and handle world board config path
+    world_board_path = handle_config_path(
+        world_board_path,
+        Path("config") / "calibration_boards",
+        logger=logger
+    )
 
-    # Get the board dictionary from the loaded board
-    main_board_dictionary = main_board.getDictionary()
+    # Board path is a directory. All boards are stored in a file called charuco_board.json
+    if Path(world_board_path).is_dir():
+        world_board_path = str(
+            Path(world_board_path) / "charuco_board.json"
+        )
+    if not Path(world_board_path).exists():
+        raise FileNotFoundError(
+            f"Board config file {world_board_path} does not exist. "
+            "The provided path must be a directory containing a file called "
+            "'charuco_board.json' "
+        )
+    
+    # Load world board path
+    main_board, main_board_dictionary = load_charuco_board_from_json(
+        world_board_path
+    )
+
+    # Check and handle ee board config path
+    if ee_board_type not in ["charuco", "aruco", "apriltag"]:
+        raise ValueError(
+            f"ee_board_type is {ee_board_type}. Must be one of 'charuco', "
+            "'aruco' or 'apriltag'"
+        )
+    if not ee_board_type == "charuco":
+        logger.warning(
+            "The use of charuco is strongly recomended for much greater "
+            "accuracy of the calibration result."
+    
+    )
+    ee_board_path = handle_config_path(
+        ee_board_path,
+        Path("config") / "calibration_boards",
+        logger=logger
+    )
+    if ee_board_type == "charuco":
+        # Board path is a directory. All boards are stored in a file called charuco_board.json
+        if Path(ee_board_path).is_dir():
+            ee_board_path = str(
+                Path(ee_board_path) / "charuco_board.json"
+            )
+        if not Path(ee_board_path).exists():
+            raise FileNotFoundError(
+                f"Board config file {ee_board_path} does not exist. "
+                "The provided path must be a directory containing a file called "
+                "'charuco_board.json' "
+            )
 
     # Board that is used to calibrate the end-effector pose and is mounted to
     # the end-effector
-    if ee_board_path is not None:
-        ee_board = load_boards([ee_board_path], [ee_board_type])[0]
-    else:
-        raise ValueError("No ee_board specified in the config file.")
+    ee_board = load_boards([ee_board_path], [ee_board_type])[0]
 
     # Get the board dictionary from the loaded board
     ee_board_dictionary = ee_board.getDictionary()
 
     # Initialize Camera
-    # If neither is specified, abort.
-    camera_dict_list = config["cameras"]
+    # Check and handle camera config path
+    camera_config_path = handle_config_path(
+            camera_config_path,
+            Path("config") / "camera_config",
+            logger=logger
+        )
 
-    if len(camera_dict_list) != 1:
-        print("Error: This script only supports calibrating one camera at a time.", file=sys.stderr)
-        sys.exit(1)
+    # The config file should exist now
+    # Load config
+    with open(camera_config_path) as f:
+        camera_config = json.load(f)
     
-    camera_dict = camera_dict_list[0]
+    camera_dict = camera_config[0]
 
     serial_number = None
     if "serial_number" in camera_dict:
@@ -192,10 +200,11 @@ def main(
     camera_matrix = camera.camera_matrix
     # Get distortion coefficients
     dist_coeffs = camera.dist_coeffs
-
-    # move robot around a bit
-    # take pictures and save robot ee-pose along with it
-    # compute basepose from it, and export
+    
+    # The ee pose calibration starts here
+    # The ee pose is move around a bit
+    # An image is recorded and the robot ee-pose along with it
+    # Then commpute base pose from it, and export
     robot_start_state = None
 
     while True:
@@ -518,6 +527,8 @@ def main(
     # Shut down robot
     robot.shutdown()
 
+    save_folder = get_extrinsic_calibration_save_folder()
+
     print("Computed base pose:")
     if len(robot_base_poses) > 1:
         print(f"Using {len(robot_base_poses)} observations to compute average.")
@@ -525,21 +536,22 @@ def main(
         estimated_base_pose = average_pose_estimates(robot_base_poses)
 
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        root = get_project_root()
-        timed_output_filepath = root / (
-            "pose_estimation_scripts/"
-            + f"calibration/{timestamp}_base_pose_robot_{name}.npy")
+
+        timed_output_filepath = (
+            save_folder / 
+            f"{robot_type}_base_pose_{timestamp}.npy"
+        )
 
         np.save(timed_output_filepath, estimated_base_pose)
 
         # Print the base pose as text file as a homogeneous transformation matrix
-        text_output_filepath = root / (
-            "pose_estimation_scripts/"
-            + f"calibration/{timestamp}_base_pose_robot_{name}.txt")
+        text_output_filepath = (
+            save_folder / 
+            f"{robot_type}_base_pose_{timestamp}.txt"
+        )
 
         with open(text_output_filepath, "w") as f:
-            f.write(f"# Robot base pose for robot {name}\n")
+            f.write(f"# Robot base pose for robot {robot_type}\n")
             f.write(f"# Estimated on {datetime.datetime.now().isoformat()}\n")
             f.write(f"# Using {len(robot_base_poses)} observations\n")
             f.write(f"Camera type: {camera_dict['type']}\n")
@@ -563,28 +575,3 @@ def main(
         print(f"Saved to {timed_output_filepath}")
     else:
         print("Did not find a sufficient number of observations.")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Robot base calibration with ArUco markers."
-    )
-    parser.add_argument(
-        "-n", "--name",
-        type=str,
-        help="Name of the robot under which the calibration should be saved.",
-        required=True,
-    )
-    parser.add_argument(
-        "-c", "--calibration_config_path",
-        type=str,
-        help="Path to the calibration config file.",
-        required=True,
-    )
-
-    args = parser.parse_args()
-
-    main(
-        args.name,
-        calibration_config_path=args.calibration_config_path
-    )
