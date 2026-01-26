@@ -175,7 +175,7 @@ def load_aruco_boards(board_configs):
 
 def load_boards(
         board_configs: list[str],
-        board_types: list[str]
+        board_types: list[str] | str,
 ) -> list[cv2.aruco.Board | cv2.aruco.CharucoBoard | AprilTagBoard]:
     """
     Load multiple boards of any of the three supported types:
@@ -192,6 +192,8 @@ def load_boards(
         Supported types are "aruco", "charuco", and "apriltag".
     """
     boards = []
+    if type(board_types) is str:
+        board_types = [board_types]
     if len(board_types) == 1 and len(board_configs) > 1:
         # If only one board type is provided, assume all boards are of that type
         board_types = board_types * len(board_configs)
