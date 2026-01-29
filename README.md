@@ -1,19 +1,15 @@
 # Tag Pose Estimation
 Author: Valentin Hartmann, Kiran Doshi. Computational Robotics Lab, ETH Zurich, 2026.
 
-## ToDos and Open Questions Repo
-- Add type hints to all functions
-- Add unit tests
-
 ## Installation
 To use the pose estimation code, first clone the repository
 ```
-git clone https://github.com/yourusername/tag-pose-estimation.git
+git clone https://github.com/kirandoshi/tag_pose_estimation.git
 ```
 
 Then cd into the repository and create a python virtual environment and activate it
 ```
-cd tag-pose-estimation/
+cd tag_pose_estimation/
 python3 -m venv venv
 source venv/bin/activate
 ```
