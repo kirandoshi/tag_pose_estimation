@@ -1,5 +1,17 @@
 # Tag Pose Estimation
-Author: Valentin Hartmann, Kiran Doshi. Computational Robotics Lab, ETH Zurich, 2026.
+Authors: Valentin Hartmann, Kiran Doshi. CRL, ETH Zurich, 2026.
+
+## Overview
+This repository contains code to estimate the 6D pose of objects using the 
+Aruco or AprilTag fiducial marker systems. The code is designed to work with
+at least two cameras simultaneously to estimate the pose of objects in a common
+world frame. The estimated poses are published via ZMQ for easy integration
+into other pipelines. This repo and README aids the full setting up of the
+pose estimation pipeline, including creating calibration boards, performing
+intrinsic and extrinsic camera calibration, creating object boards, calibrating
+the robot base position and finally running the pose estimation. The repository
+uses the opencv library as a backbone for image and tag processing and the
+apriltag library for AprilTag detection.
 
 ## Installation
 To use the pose estimation code, first clone the repository
@@ -151,8 +163,12 @@ To ensure that your robot can be calibrated correctly, you need to implement
 a robot interface class in `tag_pose_estimation/robot_interfaces/` which 
 implements the abstract methods defined in the class `RobotInterface` in
 `tag_pose_estimation/robot_interfaces/robot_interface.py`. This interface is 
-implemented for the ALOHA robot in 
-`tag_pose_estimation/robot_interfaces/aloha_robot_interface.py`. Likely you will need to have another process running for the robot itself which can take the commands and move the robot, though this depends on the implementation on the robot interface. For the ALOHA robot this is the case, the robot needs to be running in a different terminal (see ALOHA documentation.)
+implemented for the ALOHA robot as an example in 
+`tag_pose_estimation/robot_interfaces/aloha_robot_interface.py`. Likely you will 
+need to have another process running for the robot itself which can take the 
+commands and move the robot, though this depends on the implementation on the 
+robot interface. For the ALOHA robot this is the case, the robot needs to be 
+running in a different terminal.
 
 _(A potential future alteration, which is not currently implemented, is to determine
 the robot base position in the frame of the camera directly, and if the camera
@@ -251,4 +267,5 @@ pose_listener = BoardPoseListener(
 pose_listener.start()
 pose = pose_listener.get_pose(OBJ_ID)
 ```
-where the returned pose is a 1x7 numpy array [x, y, z, qw, qx, qy, qz] with the quaternion in scalar first format
+where the returned pose is a 1x7 numpy array [x, y, z, qw, qx, qy, qz] with 
+the quaternion in scalar first format.
