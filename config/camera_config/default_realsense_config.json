@@ -1,0 +1,10 @@
+{
+  "cameras": [
+    {
+      "type": "D405",
+      "serial_number": "138322253845",
+      "name": "video0",
+      "extrinsic_calibration_file": "config/extrinsic_calibration/video0_20260127_142756_extrinsic_calib_hom_transform.npy"
+    } 
+  ]
+}
