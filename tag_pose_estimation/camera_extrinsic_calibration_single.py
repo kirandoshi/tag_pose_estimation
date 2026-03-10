@@ -125,6 +125,9 @@ def single_camera_extrinsic_calibration(
     while True:
         frame = camera.get_frame()
 
+        if frame is None:   
+            continue
+
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco.detectMarkers(gray, charuco_marker_dictionary)
 
