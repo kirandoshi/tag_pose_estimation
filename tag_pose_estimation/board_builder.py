@@ -284,14 +284,15 @@ class BoardBuilder:
 
         # Add prior to anchor pose
         keys_val_list = list(keys.values())
-        if len(keys_val_list) < reference_marker:
+        reference_id = keys[reference_marker]
+        if len(keys_val_list) < reference_id:
             raise ValueError(
                 f"All markers with id less than {reference_marker} need to be "
                 "detected at least once. Likely more images need to be "
                 "captured to build the board."
                 f" Only have markers: {list(keys.keys())}"
             )
-        anchor_key = keys_val_list[reference_marker]
+        anchor_key = keys_val_list[reference_id]
         prior_noise = noiseModel.Diagonal.Sigmas(
             np.array([0.01, 0.01, 0.01, 0.01, 0.01, 0.01])
         )
@@ -625,6 +626,9 @@ class BoardBuilder:
             while True:
                 # Get frame from RealSense
                 frame = self.camera.get_frame()
+
+                if frame is None:
+                    continue
 
                 # Detect markers
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
