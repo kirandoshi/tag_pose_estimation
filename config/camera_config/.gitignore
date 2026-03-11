@@ -1,3 +1,4 @@
 *
 !.gitignore
 !default_webcam_config.json
+!default_realsense_config.json
